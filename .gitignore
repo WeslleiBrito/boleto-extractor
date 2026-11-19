@@ -220,4 +220,8 @@ marimo/_lsp/
 __marimo__/
 
 # Streamlit
+<<<<<<< HEAD
 .streamlit/secrets.toml
+=======
+.streamlit/secrets.toml
+>>>>>>> f28916f55e33343e5d0a91d64e3aeea3c15e3aa7
