@@ -1,0 +1,57 @@
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boleto-extractor"
+version = "0.1.0"
+description = "Extrator independente de códigos de boletos bancários"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyside6>=6.8",
+    "pydantic>=2.10",
+    "pymupdf>=1.25",
+    "opencv-python-headless>=4.10",
+    "zxing-cpp>=2.2",
+]
+
+[project.optional-dependencies]
+ocr = [
+    "paddleocr>=3.3",
+]
+
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+boleto_extractor = ["presentation/qml/*.qml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: testes de integração",
+]
+pythonpath = ["src"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ANN"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+strict = true
+packages = ["boleto_extractor"]
+
