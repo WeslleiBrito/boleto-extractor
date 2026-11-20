@@ -1,0 +1,1661 @@
+# ESTRUTURA DO PROJETO
+
+boleto_extractor/
+bootstrap.py
+main.py
+pyproject.toml
+README.md
+        __init__.py
+            __init__.py
+                __init__.py
+                barcode_reader.py
+                document_loader.py
+                ocr_engine.py
+                __init__.py
+                    __init__.py
+                    barcode_to_digitable_line.py
+                    digitable_line_to_barcode.py
+                    validator.py
+                    __init__.py
+                    barcode_to_digitable_line.py
+                    digitable_line_to_barcode.py
+                    validator.py
+            __init__.py
+            config.py
+            exceptions.py
+            types.py
+            __init__.py
+                __init__.py
+                boleto.py
+                extraction_result.py
+                __init__.py
+                boleto_type.py
+                extraction_status.py
+            __init__.py
+                __init__.py
+                zxing_barcode_reader.py
+                __init__.py
+                image_processor.py
+                __init__.py
+                __init__.py
+                local_document_loader.py
+            __init__.py
+            app.py
+                __init__.py
+test_real_barcode.py
+        __init__.py
+        test_real_boleto.py
+        __init__.py
+                    test_cobranca_barcode_to_digitable_line.py
+        test_barcode_reader.py
+        test_barcode_to_digitable_line.py
+        test_boleto.py
+        test_document_loader.py
+        test_image_processor.py
+    gerar_snapshot.py
+
+# CONTEÚDO DOS ARQUIVOS
+
+
+================================================================================
+ARQUIVO: bootstrap.py
+================================================================================
+
+from boleto_extractor.presentation.app import DesktopApplication
+
+
+def run() -> int:
+    application = DesktopApplication()
+    return application.executar()
+
+
+================================================================================
+ARQUIVO: main.py
+================================================================================
+
+from boleto_extractor.bootstrap import run
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())
+
+
+================================================================================
+ARQUIVO: pyproject.toml
+================================================================================
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boleto-extractor"
+version = "0.1.0"
+description = "Extrator independente de códigos de boletos bancários"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyside6>=6.8",
+    "pydantic>=2.10",
+    "pymupdf>=1.25",
+    "opencv-python-headless>=4.10",
+    "zxing-cpp>=2.2",
+]
+
+[project.optional-dependencies]
+ocr = [
+    "paddleocr>=3.3",
+]
+
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+boleto_extractor = ["presentation/qml/*.qml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: testes de integração",
+]
+pythonpath = ["src"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ANN"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+strict = true
+packages = ["boleto_extractor"]
+
+
+
+================================================================================
+ARQUIVO: README.md
+================================================================================
+# boleto-extractor
+
+================================================================================
+ARQUIVO: src/boleto_extractor/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/ports/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/ports/barcode_reader.py
+================================================================================
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class BarcodeReading:
+    valor: str
+    formato: str
+
+
+class BarcodeReader(Protocol):
+
+    def ler(self, imagem: Path) -> tuple[BarcodeReading, ...]:
+        ...
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/ports/document_loader.py
+================================================================================
+
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Protocol
+
+from boleto_extractor.core.types import ImageArray
+
+
+class DocumentLoader(Protocol):
+    """Contrato para carregamento de documentos."""
+
+    def carregar(self, arquivo: Path) -> Iterator[ImageArray]:
+        """
+        Carrega um documento e disponibiliza suas páginas como imagens.
+
+        Cada página é disponibilizada individualmente na memória.
+        """
+        ...
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/ports/ocr_engine.py
+================================================================================
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class OCRText:
+    texto: str
+    confianca: float
+    coordenadas: tuple[tuple[float, float], ...]
+
+
+class OCREngine(Protocol):
+
+    def reconhecer(self, imagem: Path) -> tuple[OCRText, ...]:
+        ...
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/arrecadacao/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/arrecadacao/barcode_to_digitable_line.py
+================================================================================
+
+from boleto_extractor.core.exceptions import BoletoValidationError
+
+
+class BarcodeToDigitableLine:
+    """Converte código de barras de arrecadação em linha digitável."""
+
+    def converter(self, codigo: str) -> str:
+        self._validar_entrada(codigo)
+
+        modulo = self._obter_modulo(codigo)
+
+        if not self._validar_dv_geral(codigo, modulo):
+            raise BoletoValidationError(
+                "O dígito verificador geral do código de barras é inválido."
+            )
+
+        grupos = [
+            codigo[i : i + 11]
+            for i in range(0, 44, 11)
+        ]
+
+        grupos_formatados = [
+            grupo + str(self._calcular_dv(grupo, modulo))
+            for grupo in grupos
+        ]
+
+        return "".join(grupos_formatados)
+
+    def _validar_entrada(self, codigo: str) -> None:
+        if not isinstance(codigo, str):
+            raise BoletoValidationError(
+                "O código de barras precisa ser uma string."
+            )
+
+        if len(codigo) != 44:
+            raise BoletoValidationError(
+                "O código de barras precisa possuir 44 dígitos."
+            )
+
+        if not codigo.isdigit():
+            raise BoletoValidationError(
+                "O código de barras deve conter somente números."
+            )
+
+        if not codigo.startswith("8"):
+            raise BoletoValidationError(
+                "O código informado não é de arrecadação."
+            )
+
+        if codigo[2] not in "6789":
+            raise BoletoValidationError(
+                "Identificador de valor ou referência inválido."
+            )
+
+    def _obter_modulo(self, codigo: str) -> int:
+        return 10 if codigo[2] in "67" else 11
+
+    def _calcular_dv(self, numero: str, modulo: int) -> int:
+        if modulo == 10:
+            return self._calcular_modulo_10(numero)
+
+        return self._calcular_modulo_11(numero)
+
+    def _calcular_modulo_10(self, numero: str) -> int:
+        soma = 0
+        peso = 2
+
+        for digito in reversed(numero):
+            produto = int(digito) * peso
+            soma += produto // 10 + produto % 10
+            peso = 1 if peso == 2 else 2
+
+        return (10 - soma % 10) % 10
+
+    def _calcular_modulo_11(self, numero: str) -> int:
+        soma = 0
+        peso = 2
+
+        for digito in reversed(numero):
+            soma += int(digito) * peso
+            peso = 2 if peso == 9 else peso + 1
+
+        resto = soma % 11
+
+        if resto in (0, 1):
+            return 0
+
+        if resto == 10:
+            return 1
+
+        return 11 - resto
+
+    def _validar_dv_geral(
+        self,
+        codigo: str,
+        modulo: int,
+    ) -> bool:
+        base = codigo[:3] + codigo[4:]
+        dv_informado = int(codigo[3])
+
+        return self._calcular_dv(base, modulo) == dv_informado
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/arrecadacao/digitable_line_to_barcode.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/arrecadacao/validator.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/cobranca/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/cobranca/barcode_to_digitable_line.py
+================================================================================
+
+from boleto_extractor.core.exceptions import BoletoValidationError
+
+
+class BarcodeToDigitableLine:
+    """Converte código de barras bancário em linha digitável."""
+
+    def converter(self, codigo: str) -> str:
+        self._validar_entrada(codigo)
+
+        if not self._validar_dv_geral(codigo):
+            raise BoletoValidationError(
+                "O dígito verificador geral é inválido."
+            )
+
+        campo_1 = codigo[:4] + codigo[19:24]
+        campo_2 = codigo[24:34]
+        campo_3 = codigo[34:44]
+
+        dv_1 = self._calcular_modulo_10(campo_1)
+        dv_2 = self._calcular_modulo_10(campo_2)
+        dv_3 = self._calcular_modulo_10(campo_3)
+
+        return (
+            campo_1 + str(dv_1)
+            + campo_2 + str(dv_2)
+            + campo_3 + str(dv_3)
+            + codigo[4]
+            + codigo[5:19]
+        )
+
+    def _validar_entrada(self, codigo: str) -> None:
+        if not isinstance(codigo, str):
+            raise BoletoValidationError(
+                "O código precisa ser uma string."
+            )
+
+        if len(codigo) != 44:
+            raise BoletoValidationError(
+                "O código precisa possuir 44 dígitos."
+            )
+
+        if not codigo.isdigit():
+            raise BoletoValidationError(
+                "O código deve conter somente números."
+            )
+
+        if codigo[3] != "9":
+            raise BoletoValidationError(
+                "Código de moeda incompatível com boleto em Real."
+            )
+
+    def _calcular_modulo_10(self, numero: str) -> int:
+        soma = 0
+        peso = 2
+
+        for digito in reversed(numero):
+            produto = int(digito) * peso
+            soma += produto // 10 + produto % 10
+            peso = 1 if peso == 2 else 2
+
+        return (10 - soma % 10) % 10
+
+    def _calcular_modulo_11(self, numero: str) -> int:
+        soma = 0
+        peso = 2
+
+        for digito in reversed(numero):
+            soma += int(digito) * peso
+            peso = 2 if peso == 9 else peso + 1
+
+        resto = soma % 11
+        resultado = 11 - resto
+
+        if resultado in (0, 10, 11):
+            return 1
+
+        return resultado
+
+    def _validar_dv_geral(self, codigo: str) -> bool:
+        base = codigo[:4] + codigo[5:]
+        dv_calculado = self._calcular_modulo_11(base)
+
+        return dv_calculado == int(codigo[4])
+    
+    def converter_para_codigo_barras(self, linha: str) -> str:
+        """Converte uma linha digitável bancária de 47 dígitos
+        em código de barras de 44 dígitos.
+        """
+        self._validar_linha_digitavel(linha)
+
+        campo_1 = linha[0:9]
+        campo_2 = linha[10:20]
+        campo_3 = linha[21:31]
+
+        dv_1 = int(linha[9])
+        dv_2 = int(linha[20])
+        dv_3 = int(linha[31])
+
+        if self._calcular_modulo_10(campo_1) != dv_1:
+            raise BoletoValidationError(
+                "O dígito verificador do primeiro campo é inválido."
+            )
+
+        if self._calcular_modulo_10(campo_2) != dv_2:
+            raise BoletoValidationError(
+                "O dígito verificador do segundo campo é inválido."
+            )
+
+        if self._calcular_modulo_10(campo_3) != dv_3:
+            raise BoletoValidationError(
+                "O dígito verificador do terceiro campo é inválido."
+            )
+
+        codigo = (
+            linha[0:4]
+            + linha[32]
+            + linha[33:47]
+            + campo_1[4:9]
+            + campo_2
+            + campo_3
+        )
+
+        self._validar_entrada(codigo)
+
+        if not self._validar_dv_geral(codigo):
+            raise BoletoValidationError(
+                "O dígito verificador geral é inválido."
+            )
+
+        return codigo
+
+    def _validar_linha_digitavel(self, linha: str) -> None:
+        if not isinstance(linha, str):
+            raise BoletoValidationError(
+                "A linha digitável precisa ser uma string."
+            )
+
+        if len(linha) != 47:
+            raise BoletoValidationError(
+                "A linha digitável precisa possuir 47 dígitos."
+            )
+
+        if not linha.isdigit():
+            raise BoletoValidationError(
+                "A linha digitável deve conter somente números."
+            )
+
+
+    def _validar_linha_digitavel(self, linha: str) -> None:
+        if not isinstance(linha, str):
+            raise BoletoValidationError(
+                "A linha digitável precisa ser uma string."
+            )
+
+        if len(linha) != 47:
+            raise BoletoValidationError(
+                "A linha digitável precisa possuir 47 dígitos."
+            )
+
+        if not linha.isdigit():
+            raise BoletoValidationError(
+                "A linha digitável deve conter somente números."
+            )
+
+    
+    
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/cobranca/digitable_line_to_barcode.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/cobranca/validator.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/core/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/core/config.py
+================================================================================
+
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
+
+
+class Settings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    app_name: str = "Extrator de Boletos"
+    version: str = "0.1.0"
+    debug: bool = True
+
+    supported_extensions: tuple[str, ...] = (
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+    )
+
+    max_workers: int = 4
+    dpi: int = 300
+
+    @property
+    def project_root(self) -> Path:
+        return Path(__file__).resolve().parents[3]
+
+
+settings = Settings()
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/core/exceptions.py
+================================================================================
+
+class BoletoExtractorError(Exception):
+    """Exceção base da aplicação."""
+
+
+class DocumentLoadError(BoletoExtractorError):
+    """Falha ao carregar um documento."""
+
+
+class OCRProcessingError(BoletoExtractorError):
+    """Falha durante o reconhecimento óptico."""
+
+
+class BarcodeReadingError(BoletoExtractorError):
+    """Falha durante a leitura do código de barras."""
+
+
+class BoletoValidationError(BoletoExtractorError):
+    """Falha durante a validação do boleto."""
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/core/types.py
+================================================================================
+import numpy as np
+from numpy.typing import NDArray
+
+ImageArray = NDArray[np.uint8]
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/entities/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/entities/boleto.py
+================================================================================
+
+from dataclasses import dataclass
+
+from boleto_extractor.domain.enums.boleto_type import BoletoType
+
+
+@dataclass(frozen=True, slots=True)
+class Boleto:
+    tipo: BoletoType
+    linha_digitavel: str | None = None
+    codigo_barras: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.linha_digitavel and not self.codigo_barras:
+            raise ValueError(
+                "O boleto precisa possuir linha digitável ou código de barras."
+            )
+
+        if self.linha_digitavel and not self.linha_digitavel.isdigit():
+            raise ValueError("A linha digitável deve conter somente números.")
+
+        if self.codigo_barras and not self.codigo_barras.isdigit():
+            raise ValueError("O código de barras deve conter somente números.")
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/entities/extraction_result.py
+================================================================================
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from boleto_extractor.domain.entities.boleto import Boleto
+from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionResult:
+    arquivo: Path
+    status: ExtractionStatus
+    boleto: Boleto | None = None
+    confianca: float | None = None
+    mensagens: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.confianca is not None:
+            if not 0.0 <= self.confianca <= 1.0:
+                raise ValueError(
+                    "A confiança deve estar entre 0.0 e 1.0."
+                )
+
+        if self.status == ExtractionStatus.SUCCESS and self.boleto is None:
+            raise ValueError(
+                "Uma extração bem-sucedida precisa possuir um boleto."
+            )
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/enums/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/enums/boleto_type.py
+================================================================================
+
+from enum import StrEnum
+
+
+class BoletoType(StrEnum):
+    BANK_SLIP = "bank_slip"
+    ARRECADACAO = "arrecadacao"
+    UNKNOWN = "unknown"
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/enums/extraction_status.py
+================================================================================
+
+from enum import StrEnum
+
+
+class ExtractionStatus(StrEnum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    INVALID = "invalid"
+    REVIEW = "review"
+    ERROR = "error"
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/barcode/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/barcode/zxing_barcode_reader.py
+================================================================================
+
+import cv2
+import numpy as np
+import zxingcpp
+
+from boleto_extractor.application.ports.barcode_reader import (
+    BarcodeReading,
+)
+from boleto_extractor.core.exceptions import BarcodeReadingError
+from boleto_extractor.core.types import ImageArray
+
+
+class ZXingBarcodeReader:
+    """Implementação do leitor de códigos de barras utilizando ZXing-C++."""
+
+    def __init__(
+        self,
+        try_rotate: bool = True,
+        try_downscale: bool = True,
+        try_invert: bool = True,
+    ) -> None:
+        self._formats = zxingcpp.barcode_formats_from_str("ITF, Code128")
+        self._try_rotate = try_rotate
+        self._try_downscale = try_downscale
+        self._try_invert = try_invert
+
+    def ler(self, imagem: ImageArray) -> tuple[BarcodeReading, ...]:
+        self._validar_imagem(imagem)
+
+        try:
+            imagem_bgr = cv2.cvtColor(imagem, cv2.COLOR_RGB2BGR)
+            imagem_bgr = np.ascontiguousarray(imagem_bgr)
+
+            codigos = zxingcpp.read_barcodes(
+                imagem_bgr,
+                formats=self._formats,
+                try_rotate=self._try_rotate,
+                try_downscale=self._try_downscale,
+                try_invert=self._try_invert,
+            )
+
+            return tuple(
+                BarcodeReading(
+                    valor=codigo.text,
+                    formato=str(codigo.format),
+                )
+                for codigo in codigos
+                if codigo.valid and codigo.text
+            )
+
+        except Exception as exc:
+            raise BarcodeReadingError(
+                "Não foi possível realizar a leitura do código de barras."
+            ) from exc
+
+    def _validar_imagem(self, imagem: ImageArray) -> None:
+        if not isinstance(imagem, np.ndarray):
+            raise BarcodeReadingError(
+                "A imagem precisa ser um array NumPy."
+            )
+
+        if imagem.size == 0:
+            raise BarcodeReadingError("A imagem está vazia.")
+
+        if imagem.dtype != np.uint8:
+            raise BarcodeReadingError(
+                "A imagem precisa utilizar o tipo uint8."
+            )
+
+        if imagem.ndim != 3 or imagem.shape[2] != 3:
+            raise BarcodeReadingError(
+                "A imagem precisa possuir três canais RGB."
+            )
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/image/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/image/image_processor.py
+================================================================================
+from typing import cast
+
+import cv2
+import numpy as np
+
+from boleto_extractor.core.exceptions import DocumentLoadError
+from boleto_extractor.core.types import ImageArray
+
+
+class ImageProcessor:
+    """Realiza operações de preparação de imagens para reconhecimento."""
+
+    def validar(self, imagem: ImageArray) -> None:
+        if not isinstance(imagem, np.ndarray):
+            raise DocumentLoadError(
+                "A imagem precisa ser um array NumPy."
+            )
+
+        if imagem.size == 0:
+            raise DocumentLoadError(
+                "A imagem está vazia."
+            )
+
+        if imagem.dtype != np.uint8:
+            raise DocumentLoadError(
+                "A imagem precisa utilizar o tipo uint8."
+            )
+
+        if imagem.ndim != 3 or imagem.shape[2] != 3:
+            raise DocumentLoadError(
+                "A imagem precisa possuir três canais RGB."
+            )
+
+    def redimensionar(
+        self,
+        imagem: ImageArray,
+        largura_maxima: int = 2000,
+    ) -> ImageArray:
+
+        self.validar(imagem)
+
+        altura, largura = imagem.shape[:2]
+
+        if largura <= largura_maxima:
+            return imagem
+
+        proporcao = largura_maxima / largura
+
+        nova_altura = int(altura * proporcao)
+
+        return cast(
+    ImageArray,
+    cv2.resize(
+        imagem,
+        (largura_maxima, nova_altura),
+        interpolation=cv2.INTER_AREA,
+    ),
+)
+    def escala_cinza(
+        self,
+        imagem: ImageArray,
+    ) -> ImageArray:
+
+        self.validar(imagem)
+
+        return cast(
+    ImageArray,
+    cv2.cvtColor(imagem, cv2.COLOR_RGB2GRAY),
+)
+    def binarizar(
+        self,
+        imagem: ImageArray,
+    ) -> ImageArray:
+
+        cinza = self.escala_cinza(imagem)
+
+        return cast(
+            ImageArray,
+    cv2.adaptiveThreshold(
+        cinza,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        11,
+    ),
+)
+
+    def melhorar_contraste(
+        self,
+        imagem: ImageArray,
+    ) -> ImageArray:
+
+        cinza = self.escala_cinza(imagem)
+
+        clahe = cv2.createCLAHE(
+            clipLimit=2.0,
+            tileGridSize=(8, 8),
+        )
+
+        return cast(
+            ImageArray,
+            clahe.apply(cinza),
+        )
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/ocr/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/pdf/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/pdf/local_document_loader.py
+================================================================================
+
+from collections.abc import Iterator
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pymupdf
+
+from boleto_extractor.core.config import settings
+from boleto_extractor.core.exceptions import DocumentLoadError
+from boleto_extractor.core.types import ImageArray
+
+
+class LocalDocumentLoader:
+    """Carrega documentos PDF e imagens diretamente na memória."""
+
+    def __init__(self, dpi: int | None = None) -> None:
+        self._dpi = dpi or settings.dpi
+
+    def carregar(self, arquivo: Path) -> Iterator[ImageArray]:
+        arquivo = arquivo.resolve()
+
+        self._validar_arquivo(arquivo)
+
+        extensao = arquivo.suffix.lower()
+
+        if extensao == ".pdf":
+            yield from self._carregar_pdf(arquivo)
+        else:
+            yield self._carregar_imagem(arquivo)
+
+    def _validar_arquivo(self, arquivo: Path) -> None:
+        if not arquivo.exists():
+            raise DocumentLoadError(
+                f"Arquivo não encontrado: {arquivo}"
+            )
+
+        if not arquivo.is_file():
+            raise DocumentLoadError(
+                f"O caminho informado não é um arquivo: {arquivo}"
+            )
+
+        if arquivo.suffix.lower() not in settings.supported_extensions:
+            raise DocumentLoadError(
+                f"Formato não suportado: {arquivo.suffix}"
+            )
+
+    def _carregar_pdf(
+        self,
+        arquivo: Path,
+    ) -> Iterator[ImageArray]:
+
+        try:
+            with pymupdf.open(arquivo) as documento:  # type: ignore[no-untyped-call]
+
+                if documento.page_count == 0:
+                    raise DocumentLoadError(
+                        "O documento PDF não possui páginas."
+                    )
+
+                for pagina in documento:
+                    pixmap = pagina.get_pixmap(
+                        dpi=self._dpi,
+                        colorspace=pymupdf.csRGB,
+                        alpha=False,
+                    )
+
+                    imagem = np.frombuffer(
+                        pixmap.samples,
+                        dtype=np.uint8,
+                    )
+
+                    imagem = imagem.reshape(
+                        pixmap.height,
+                        pixmap.width,
+                        3,
+                    )
+
+                    yield np.ascontiguousarray(imagem)
+
+        except DocumentLoadError:
+            raise
+
+        except Exception as exc:
+            raise DocumentLoadError(
+                f"Não foi possível processar o PDF: {arquivo.name}"
+            ) from exc
+
+    def _carregar_imagem(self, arquivo: Path) -> ImageArray:
+        try:
+            dados = np.fromfile(arquivo, dtype=np.uint8)
+
+            imagem = cv2.imdecode(
+                dados,
+                cv2.IMREAD_COLOR,
+            )
+
+            if imagem is None:
+                raise DocumentLoadError(
+                    f"Não foi possível decodificar: {arquivo.name}"
+                )
+
+            imagem_rgb = cv2.cvtColor(
+                imagem,
+                cv2.COLOR_BGR2RGB,
+            )
+
+            return np.ascontiguousarray(imagem_rgb)
+
+        except DocumentLoadError:
+            raise
+
+        except Exception as exc:
+            raise DocumentLoadError(
+                f"Falha ao carregar a imagem: {arquivo.name}"
+            ) from exc
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/presentation/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/presentation/app.py
+================================================================================
+
+from pathlib import Path
+
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+
+
+class DesktopApplication:
+
+    def __init__(self) -> None:
+        self._application = QGuiApplication([])
+        self._engine = QQmlApplicationEngine()
+
+    def executar(self) -> int:
+        self._application.setApplicationName("Extrator de Boletos")
+
+        qml_path = Path(__file__).parent / "qml" / "Main.qml"
+
+        self._engine.load(QUrl.fromLocalFile(str(qml_path.resolve())))
+
+        if not self._engine.rootObjects():
+            return 1
+
+        return self._application.exec()
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/presentation/qml/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: test_real_barcode.py
+================================================================================
+from pathlib import Path
+
+import pymupdf
+import numpy as np
+
+from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import (
+    ZXingBarcodeReader,
+)
+
+def calcular_modulo_10(numero: str) -> int:
+    soma = 0
+    peso = 2
+
+    for digito in reversed(numero):
+        resultado = int(digito) * peso
+        soma += resultado // 10 + resultado % 10
+        peso = 1 if peso == 2 else 2
+
+    return (10 - soma % 10) % 10
+
+arquivo = Path("IMG_20261118_204625_.jpg")
+
+imagem = pymupdf.Pixmap(str(arquivo))
+
+reader = ZXingBarcodeReader()
+
+# Carregamento da imagem usando OpenCV
+import cv2
+
+imagem_array = cv2.imread(str(arquivo))
+imagem_rgb = cv2.cvtColor(imagem_array, cv2.COLOR_BGR2RGB)
+
+resultados = reader.ler(imagem_rgb)
+
+codigo = resultados[0].valor
+
+# DV geral: posição 4 (índice 3)
+base = codigo[:3] + codigo[4:]
+dv_calculado = calcular_modulo_10(base)
+
+print(f"DV informado: {codigo[3]}")
+print(f"DV calculado: {dv_calculado}")
+print(f"DV válido: {codigo[3] == str(dv_calculado)}")
+
+for resultado in resultados:
+    print(f"Código: {resultado.valor}")
+    print(f"Formato: {resultado.formato}")
+    print(f"Quantidade de dígitos: {len(resultado.valor)}")
+
+================================================================================
+ARQUIVO: tests/integration/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: tests/integration/test_real_boleto.py
+================================================================================
+
+from pathlib import Path
+
+import cv2
+import pytest
+
+from boleto_extractor.application.services.cobranca.barcode_to_digitable_line import (
+    BarcodeToDigitableLine,
+)
+from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import (
+    ZXingBarcodeReader,
+)
+
+
+@pytest.mark.integration
+def test_extrair_linha_digitavel_de_boleto_real() -> None:
+    arquivo = Path("IMG_20261119_053700.jpg")
+
+    imagem_bgr = cv2.imread(str(arquivo))
+
+    assert imagem_bgr is not None, "Não foi possível carregar a imagem."
+
+    imagem_rgb = cv2.cvtColor(imagem_bgr, cv2.COLOR_BGR2RGB)
+
+    leitor = ZXingBarcodeReader()
+    conversor = BarcodeToDigitableLine()
+
+    codigos = leitor.ler(imagem_rgb)
+
+    assert codigos, "Nenhum código de barras foi encontrado."
+
+    for codigo in codigos:
+        print(f"\nCódigo encontrado: {codigo.valor}")
+        print(f"Formato: {codigo.formato}")
+
+        linha = conversor.converter(codigo.valor)
+
+        print(f"Linha digitável: {linha}")
+
+        assert len(linha) == 47
+
+
+================================================================================
+ARQUIVO: tests/unit/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: tests/unit/application/services/cobranca/test_cobranca_barcode_to_digitable_line.py
+================================================================================
+import pytest
+
+from boleto_extractor.application.services.arrecadacao.barcode_to_digitable_line import (
+    BarcodeToDigitableLine,
+)
+from boleto_extractor.core.exceptions import BoletoValidationError
+
+
+CODIGO_ARRECADACAO = "82680000001820100478209729700310261000000000"
+
+LINHA_ARRECADACAO = (
+    "826800000018"
+    "820100478206"
+    "972970031027"
+    "610000000006"
+)
+
+
+@pytest.fixture
+def converter() -> BarcodeToDigitableLine:
+    return BarcodeToDigitableLine()
+
+
+def _remover_dvs_dos_blocos(linha: str) -> str:
+    """Remove o DV de cada um dos 4 blocos de 12 dígitos."""
+    return "".join(linha[i:i + 11] for i in range(0, 48, 12))
+
+
+def test_converter_codigo_arrecadacao_modulo_10(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    resultado = converter.converter(CODIGO_ARRECADACAO)
+
+    assert resultado == LINHA_ARRECADACAO
+
+
+def test_linha_digitavel_deve_ter_48_digitos(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    resultado = converter.converter(CODIGO_ARRECADACAO)
+
+    assert len(resultado) == 48
+    assert resultado.isdigit()
+
+
+def test_round_trip_arrecadacao(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    linha = converter.converter(CODIGO_ARRECADACAO)
+
+    codigo_reconstruido = _remover_dvs_dos_blocos(linha)
+
+    assert codigo_reconstruido == CODIGO_ARRECADACAO
+
+
+def test_rejeitar_codigo_com_tamanho_invalido(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    with pytest.raises(BoletoValidationError):
+        converter.converter("82680000001")
+
+
+def test_rejeitar_codigo_com_dv_geral_invalido(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    codigo = "82600000001820100478209729700310261000000000"
+
+    with pytest.raises(BoletoValidationError):
+        converter.converter(codigo)
+
+
+def test_rejeitar_codigo_nao_numerico(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    codigo = "8268000000182010047820972970031026100000000X"
+
+    with pytest.raises(BoletoValidationError):
+        converter.converter(codigo)
+
+
+================================================================================
+ARQUIVO: tests/unit/test_barcode_reader.py
+================================================================================
+
+import numpy as np
+import pytest
+
+from boleto_extractor.core.exceptions import BarcodeReadingError
+from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import (
+    ZXingBarcodeReader,
+)
+
+
+@pytest.fixture
+def leitor() -> ZXingBarcodeReader:
+    return ZXingBarcodeReader()
+
+
+def test_deve_retornar_tupla_vazia_quando_nao_encontrar_codigo(
+    leitor: ZXingBarcodeReader,
+) -> None:
+    imagem = np.full((500, 800, 3), 255, dtype=np.uint8)
+
+    resultado = leitor.ler(imagem)
+
+    assert resultado == ()
+
+
+def test_nao_deve_aceitar_imagem_vazia(
+    leitor: ZXingBarcodeReader,
+) -> None:
+    imagem = np.array([], dtype=np.uint8)
+
+    with pytest.raises(BarcodeReadingError):
+        leitor.ler(imagem)
+
+
+def test_nao_deve_aceitar_imagem_com_tipo_invalido(
+    leitor: ZXingBarcodeReader,
+) -> None:
+    imagem = np.zeros((100, 100, 3), dtype=np.float32)
+
+    with pytest.raises(BarcodeReadingError):
+        leitor.ler(imagem)
+
+
+def test_nao_deve_aceitar_imagem_sem_tres_canais(
+    leitor: ZXingBarcodeReader,
+) -> None:
+    imagem = np.zeros((100, 100), dtype=np.uint8)
+
+    with pytest.raises(BarcodeReadingError):
+        leitor.ler(imagem)
+
+
+================================================================================
+ARQUIVO: tests/unit/test_barcode_to_digitable_line.py
+================================================================================
+
+import pytest
+
+from boleto_extractor.application.services.arrecadacao.barcode_to_digitable_line import (
+    BarcodeToDigitableLine,
+)
+from boleto_extractor.core.exceptions import BoletoValidationError
+
+
+@pytest.fixture
+def converter() -> BarcodeToDigitableLine:
+    return BarcodeToDigitableLine()
+
+
+def test_converter_codigo_arrecadacao_modulo_10(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    codigo = "82680000001820100478209729700310261000000000"
+
+    resultado = converter.converter(codigo)
+
+    esperado = (
+        "826800000018"
+        "820100478206"
+        "972970031027"
+        "610000000006"
+    )
+
+    assert resultado == esperado
+
+
+def test_rejeitar_codigo_com_tamanho_invalido(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    with pytest.raises(BoletoValidationError):
+        converter.converter("82680000001")
+
+
+def test_rejeitar_codigo_com_dv_geral_invalido(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    codigo = "82600000001820100478209729700310261000000000"
+
+    with pytest.raises(BoletoValidationError):
+        converter.converter(codigo)
+
+
+def test_rejeitar_codigo_nao_numerico(
+    converter: BarcodeToDigitableLine,
+) -> None:
+    codigo = "8268000000182010047820972970031026100000000X"
+
+    with pytest.raises(BoletoValidationError):
+        converter.converter(codigo)
+
+
+================================================================================
+ARQUIVO: tests/unit/test_boleto.py
+================================================================================
+
+import pytest
+
+from boleto_extractor.domain.entities.boleto import Boleto
+from boleto_extractor.domain.enums.boleto_type import BoletoType
+
+
+def test_deve_criar_boleto_com_linha_digitavel() -> None:
+    boleto = Boleto(
+        tipo=BoletoType.BANK_SLIP,
+        linha_digitavel="12345678901234567890123456789012345678901234567",
+    )
+
+    assert boleto.tipo == BoletoType.BANK_SLIP
+    assert boleto.linha_digitavel is not None
+
+
+def test_nao_deve_criar_boleto_sem_codigo() -> None:
+    with pytest.raises(ValueError):
+        Boleto(tipo=BoletoType.BANK_SLIP)
+
+
+def test_nao_deve_aceitar_letras_na_linha_digitavel() -> None:
+    with pytest.raises(ValueError):
+        Boleto(
+            tipo=BoletoType.BANK_SLIP,
+            linha_digitavel="123ABC",
+        )
+
+
+================================================================================
+ARQUIVO: tests/unit/test_document_loader.py
+================================================================================
+
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pymupdf
+import pytest
+
+from boleto_extractor.core.exceptions import DocumentLoadError
+from boleto_extractor.infrastructure.pdf.local_document_loader import (
+    LocalDocumentLoader,
+)
+
+
+def test_deve_carregar_imagem_png(tmp_path: Path) -> None:
+    arquivo = tmp_path / "boleto.png"
+
+    imagem_original = np.zeros((200, 300, 3), dtype=np.uint8)
+
+    sucesso, buffer = cv2.imencode(".png", imagem_original)
+
+    assert sucesso
+
+    buffer.tofile(str(arquivo))
+
+    loader = LocalDocumentLoader()
+
+    paginas = tuple(loader.carregar(arquivo))
+
+    assert len(paginas) == 1
+    assert paginas[0].shape == (200, 300, 3)
+    assert paginas[0].dtype == np.uint8
+
+
+def test_deve_carregar_pdf_com_duas_paginas(tmp_path: Path) -> None:
+    arquivo = tmp_path / "boleto.pdf"
+
+    documento = pymupdf.open()
+
+    documento.new_page(width=300, height=200)
+    documento.new_page(width=300, height=200)
+
+    documento.save(arquivo)
+    documento.close()
+
+    loader = LocalDocumentLoader(dpi=72)
+
+    paginas = tuple(loader.carregar(arquivo))
+
+    assert len(paginas) == 2
+    assert paginas[0].shape == (200, 300, 3)
+
+
+def test_deve_rejeitar_arquivo_inexistente(tmp_path: Path) -> None:
+    arquivo = tmp_path / "inexistente.pdf"
+
+    loader = LocalDocumentLoader()
+
+    with pytest.raises(DocumentLoadError):
+        tuple(loader.carregar(arquivo))
+
+
+def test_deve_rejeitar_formato_nao_suportado(tmp_path: Path) -> None:
+    arquivo = tmp_path / "documento.txt"
+    arquivo.write_text("teste")
+
+    loader = LocalDocumentLoader()
+
+    with pytest.raises(DocumentLoadError):
+        tuple(loader.carregar(arquivo))
+
+
+================================================================================
+ARQUIVO: tests/unit/test_image_processor.py
+================================================================================
+
+import numpy as np
+import pytest
+
+from boleto_extractor.core.exceptions import DocumentLoadError
+from boleto_extractor.infrastructure.image.image_processor import ImageProcessor
+
+
+@pytest.fixture
+def imagem() -> np.ndarray:
+    return np.full((1000, 1500, 3), 255, dtype=np.uint8)
+
+
+def test_deve_validar_imagem(imagem: np.ndarray) -> None:
+    processor = ImageProcessor()
+
+    processor.validar(imagem)
+
+
+def test_deve_redimensionar_imagem(imagem: np.ndarray) -> None:
+    processor = ImageProcessor()
+
+    resultado = processor.redimensionar(
+        imagem,
+        largura_maxima=1000,
+    )
+
+    assert resultado.shape == (666, 1000, 3)
+
+
+def test_deve_converter_para_escala_cinza(
+    imagem: np.ndarray,
+) -> None:
+    processor = ImageProcessor()
+
+    resultado = processor.escala_cinza(imagem)
+
+    assert resultado.ndim == 2
+    assert resultado.dtype == np.uint8
+
+
+def test_deve_binarizar_imagem(imagem: np.ndarray) -> None:
+    processor = ImageProcessor()
+
+    resultado = processor.binarizar(imagem)
+
+    assert resultado.ndim == 2
+    assert set(np.unique(resultado)).issubset({0, 255})
+
+
+def test_nao_deve_aceitar_imagem_vazia() -> None:
+    processor = ImageProcessor()
+
+    imagem = np.array([], dtype=np.uint8)
+
+    with pytest.raises(DocumentLoadError):
+        processor.validar(imagem)
+
+
+================================================================================
+ARQUIVO: tools/gerar_snapshot.py
+================================================================================
+"""
+Gera um único arquivo com a estrutura e o conteúdo do projeto,
+pronto para ser enviado a uma IA.
+
+Uso:
+    python tools/gerar_snapshot.py
+    python tools/gerar_snapshot.py --saida snapshot.txt --max-kb 200
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parent.parent
+
+PASTAS_IGNORADAS = {
+    ".venv", "venv", ".git", "__pycache__", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
+    "build", "dist", "htmlcov", ".tox", "node_modules",
+}
+
+EXTENSOES_INCLUIDAS = {
+    ".py", ".toml", ".cfg", ".ini", ".md", ".txt",
+    ".yaml", ".yml", ".json", ".spec",
+}
+
+ARQUIVOS_IGNORADOS = {"snapshot_projeto.txt", ".coverage"}
+
+
+def deve_ignorar(caminho: Path) -> bool:
+    partes = set(caminho.relative_to(RAIZ).parts)
+    if partes & PASTAS_IGNORADAS:
+        return True
+    if any(p.endswith(".egg-info") for p in partes):
+        return True
+    return caminho.name in ARQUIVOS_IGNORADOS
+
+
+def gerar_arvore(arquivos: list[Path]) -> str:
+    linhas = [f"{RAIZ.name}/"]
+    for arquivo in arquivos:
+        relativo = arquivo.relative_to(RAIZ)
+        nivel = len(relativo.parts) - 1
+        linhas.append(f"{'    ' * nivel}{relativo.name}")
+    return "\n".join(linhas)
+
+
+def coletar_arquivos() -> list[Path]:
+    return sorted(
+        p for p in RAIZ.rglob("*")
+        if p.is_file()
+        and not deve_ignorar(p)
+        and p.suffix.lower() in EXTENSOES_INCLUIDAS
+    )
+
+
+def ler_conteudo(arquivo: Path, max_bytes: int) -> str:
+    if arquivo.stat().st_size > max_bytes:
+        return f"[arquivo omitido: maior que {max_bytes // 1024} KB]"
+    try:
+        return arquivo.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return arquivo.read_text(encoding="latin-1")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--saida", default="snapshot_projeto.txt")
+    parser.add_argument("--max-kb", type=int, default=200)
+    args = parser.parse_args()
+
+    arquivos = coletar_arquivos()
+    saida = RAIZ / args.saida
+    max_bytes = args.max_kb * 1024
+
+    with saida.open("w", encoding="utf-8") as f:
+        f.write("# ESTRUTURA DO PROJETO\n\n")
+        f.write(gerar_arvore(arquivos))
+        f.write("\n\n# CONTEÚDO DOS ARQUIVOS\n")
+
+        for arquivo in arquivos:
+            relativo = arquivo.relative_to(RAIZ).as_posix()
+            f.write(f"\n\n{'=' * 80}\n")
+            f.write(f"ARQUIVO: {relativo}\n")
+            f.write(f"{'=' * 80}\n")
+            f.write(ler_conteudo(arquivo, max_bytes))
+
+    tamanho_kb = saida.stat().st_size / 1024
+    print(f"✔ {len(arquivos)} arquivos -> {saida.name} ({tamanho_kb:.1f} KB)")
+
+
+if __name__ == "__main__":
+    main()

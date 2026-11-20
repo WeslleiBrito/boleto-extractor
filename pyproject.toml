@@ -1,4 +1,3 @@
-
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
@@ -17,16 +16,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ocr = [
-    "paddleocr>=3.3",
-]
-
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "mypy>=1.14",
     "ruff>=0.9",
+    "pyinstaller>=6.11",
 ]
+
+[project.scripts]
+boleto-extractor = "boleto_extractor.bootstrap:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -54,4 +53,3 @@ python_version = "3.12"
 mypy_path = "src"
 strict = true
 packages = ["boleto_extractor"]
-

@@ -1,0 +1,15 @@
+VSVersionInfo(
+    ffi=FixedFileInfo(filevers=(1, 0, 0, 0), prodvers=(1, 0, 0, 0)),
+    kids=[
+        StringFileInfo([
+            StringTable("041604B0", [
+                StringStruct("CompanyName", "Sua Empresa"),
+                StringStruct("FileDescription", "Extrator de Boletos"),
+                StringStruct("FileVersion", "1.0.0"),
+                StringStruct("ProductName", "Extrator de Boletos"),
+                StringStruct("ProductVersion", "1.0.0"),
+            ])
+        ]),
+        VarFileInfo([VarStruct("Translation", [1046, 1200])]),
+    ],
+)

@@ -1,7 +1,7 @@
-
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
+
+from boleto_extractor.core.types import ImageArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +11,7 @@ class BarcodeReading:
 
 
 class BarcodeReader(Protocol):
+    """Contrato para leitores de código de barras."""
 
-    def ler(self, imagem: Path) -> tuple[BarcodeReading, ...]:
+    def ler(self, imagem: ImageArray) -> tuple[BarcodeReading, ...]:
         ...
