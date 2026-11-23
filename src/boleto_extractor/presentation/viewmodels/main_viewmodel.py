@@ -14,7 +14,18 @@ from boleto_extractor.presentation.formatting import (
     formatar_valor_csv,
 )
 from boleto_extractor.presentation.viewmodels.extraction_worker import ExtractionWorker
-from boleto_extractor.presentation.viewmodels.result_list_model import ResultListModel
+from boleto_extractor.presentation.viewmodels.result_list_model import (
+    LinhaResultado,
+    ResultListModel,
+)
+
+_CABECALHO = [
+    "Arquivo", "Página", "Status", "Tipo", "Emissor", "Vencimento",
+    "Valor", "Linha digitável", "Código de barras", "Mensagem",
+    "Beneficiário documento", "Beneficiário tipo", "Razão social", "Nome fantasia",
+    "Situação cadastral", "Município", "UF", "E-mail", "Telefone",
+    "CNAE principal", "Porte", "Opção Simples", "Opção MEI",
+]
 
 
 class MainViewModel(QObject):
@@ -144,22 +155,29 @@ class MainViewModel(QObject):
             QGuiApplication.clipboard().setText(texto)
             self.notificacao.emit("Linha digitável copiada!")
 
+    @staticmethod
+    def _linha_csv(item: LinhaResultado) -> list[object]:
+        b = item.beneficiario
+        e = item.empresa
+        return [
+            item.caminho.name, item.pagina or "", item.status, item.tipo,
+            item.emissor, item.vencimento, formatar_valor_csv(item.valor),
+            formatar_linha(item.linha), item.codigo, item.mensagem,
+            b.documento_formatado if b else "", b.tipo if b else "",
+            e.razao_social, e.nome_fantasia, e.situacao_cadastral, e.municipio, e.uf,
+            e.email, e.telefone, e.cnae_principal, e.porte_empresa,
+            e.opcao_simples, e.opcao_mei,
+        ]
+
     @Slot(QUrl)
     def exportarCsv(self, url: QUrl) -> None:
         destino = Path(url.toLocalFile())
         try:
             with destino.open("w", newline="", encoding="utf-8-sig") as f:
                 escritor = csv.writer(f, delimiter=";")
-                escritor.writerow([
-                    "Arquivo", "Página", "Status", "Tipo", "Emissor", "Vencimento",
-                    "Valor", "Linha digitável", "Código de barras", "Mensagem",
-                ])
+                escritor.writerow(_CABECALHO)
                 for item in self._model.itens():
-                    escritor.writerow([
-                        item.caminho.name, item.pagina or "", item.status, item.tipo,
-                        item.emissor, item.vencimento, formatar_valor_csv(item.valor),
-                        formatar_linha(item.linha), item.codigo, item.mensagem,
-                    ])
+                    escritor.writerow(self._linha_csv(item))
             self.notificacao.emit(f"Exportado para {destino.name}")
         except OSError as exc:
             self.notificacao.emit(f"Falha ao exportar: {exc}")

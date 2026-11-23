@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     Qt,
 )
 
+from boleto_extractor.domain.entities.beneficiario import Beneficiario, DadosEmpresa
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.boleto_type import BoletoType
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
@@ -29,8 +30,10 @@ TIPOS = {
 _CAMPOS = (
     "arquivo", "caminho", "pagina", "status", "tipo", "emissor", "vencimento",
     "valor", "linha", "linhaFormatada", "codigo", "mensagem",
+    "beneficiario", "beneficiarioDoc", "situacao", "beneficiarioDetalhe",
 )
 _BASE = Qt.ItemDataRole.UserRole.value + 1
+_VAZIA = DadosEmpresa()
 
 
 @dataclass(slots=True)
@@ -46,6 +49,43 @@ class LinhaResultado:
     linha: str = ""
     codigo: str = ""
     mensagem: str = "Na fila…"
+    beneficiario: Beneficiario | None = None
+
+    @property
+    def empresa(self) -> DadosEmpresa:
+        if self.beneficiario and self.beneficiario.empresa:
+            return self.beneficiario.empresa
+        return _VAZIA
+
+    @property
+    def documento(self) -> str:
+        return self.beneficiario.documento_formatado if self.beneficiario else ""
+
+    def detalhe_beneficiario(self) -> str:
+        b = self.beneficiario
+        if b is None:
+            return ""
+        e = self.empresa
+        local = " / ".join(x for x in (e.municipio, e.uf) if x)
+        pares = (
+            (b.tipo, b.documento_formatado),
+            ("Razão social", e.razao_social),
+            ("Fantasia", e.nome_fantasia),
+            ("Situação", e.situacao_cadastral),
+            ("Local", local),
+            ("Telefone", e.telefone),
+            ("E-mail", e.email),
+            ("CNAE", e.cnae_principal),
+            ("Porte", e.porte_empresa),
+            ("Simples", e.opcao_simples),
+            ("MEI", e.opcao_mei),
+        )
+        linhas = [f"{k}: {v}" for k, v in pares if v]
+        if b.confirmado_pelo_codigo:
+            linhas.append("✔ CNPJ confirmado pelo código de barras")
+        if b.tipo == "CNPJ" and b.empresa is None:
+            linhas.append("Dados da empresa indisponíveis no momento")
+        return "\n".join(linhas)
 
 
 class ResultListModel(QAbstractListModel):
@@ -67,6 +107,10 @@ class ResultListModel(QAbstractListModel):
             return None
 
         item = self._itens[index.row()]
+        campo = _CAMPOS[posicao]
+        if campo == "beneficiarioDetalhe":
+            return item.detalhe_beneficiario()
+
         valores: dict[str, object] = {
             "arquivo": item.caminho.name,
             "caminho": str(item.caminho),
@@ -80,8 +124,11 @@ class ResultListModel(QAbstractListModel):
             "linhaFormatada": formatar_linha(item.linha),
             "codigo": item.codigo,
             "mensagem": item.mensagem,
+            "beneficiario": item.beneficiario.nome if item.beneficiario else "",
+            "beneficiarioDoc": item.documento,
+            "situacao": item.empresa.situacao_cadastral,
         }
-        return valores[_CAMPOS[posicao]]
+        return valores[campo]
 
     def adicionar(self, job_id: int, caminho: Path) -> None:
         linha = len(self._itens)
@@ -126,6 +173,7 @@ class ResultListModel(QAbstractListModel):
         item.status = resultado.status.value
         item.pagina = resultado.pagina
         item.mensagem = " | ".join(resultado.mensagens)
+        item.beneficiario = resultado.beneficiario
 
         boleto = resultado.boleto
         if boleto is None:
