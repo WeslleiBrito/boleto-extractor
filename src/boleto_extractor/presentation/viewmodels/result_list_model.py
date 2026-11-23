@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,6 +12,10 @@ from PySide6.QtCore import (
     Qt,
 )
 
+from boleto_extractor.application.services.matching_service import (
+    ROTULOS,
+    ResultadoSincronizacao,
+)
 from boleto_extractor.domain.entities.beneficiario import Beneficiario, DadosEmpresa
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.boleto_type import BoletoType
@@ -31,6 +36,9 @@ _CAMPOS = (
     "arquivo", "caminho", "pagina", "status", "tipo", "emissor", "vencimento",
     "valor", "linha", "linhaFormatada", "codigo", "mensagem",
     "beneficiario", "beneficiarioDoc", "situacao", "beneficiarioDetalhe", "protegido",
+    # Sincronização com o ERP
+    "elegivel", "documentoErp", "vencimentoTexto", "vencimentoIso", "vencimentoEditavel",
+    "erroDocumento", "erroData", "statusErp", "statusErpTexto", "parcelaErp", "detalheErp",
 )
 _BASE = Qt.ItemDataRole.UserRole.value + 1
 _VAZIA = DadosEmpresa()
@@ -45,13 +53,21 @@ class LinhaResultado:
     status: str = ExtractionStatus.PENDING.value
     tipo: str = ""
     emissor: str = ""
-    vencimento: str = ""
+    vencimento: str = ""                      # texto exibido (formatar_data)
     valor: Decimal | None = None
     linha: str = ""
     codigo: str = ""
     mensagem: str = "Na fila…"
     beneficiario: Beneficiario | None = None
     protegido: bool = False
+    # ---- Sincronização ----
+    vencimento_data: date | None = None       # data extraída
+    vencimento_travado: bool = False          # True = veio do fator do código (confiável)
+    vencimento_manual: date | None = None     # digitada/escolhida no calendário
+    documento_erp: int | None = None          # pagparc_documento
+    erro_documento: bool = False
+    erro_data: bool = False
+    sincronizacao: ResultadoSincronizacao | None = None
 
     @property
     def empresa(self) -> DadosEmpresa:
@@ -60,8 +76,24 @@ class LinhaResultado:
         return _VAZIA
 
     @property
-    def documento(self) -> str:
+    def beneficiario_doc(self) -> str:
+        """CPF/CNPJ do beneficiário (não confundir com documento_erp)."""
         return self.beneficiario.documento_formatado if self.beneficiario else ""
+
+    @property
+    def chave(self) -> str:
+        """Identificador único da linha para a sincronização."""
+        return f"{self.job_id}:{self.pagina or 0}:{self.codigo}"
+
+    @property
+    def elegivel(self) -> bool:
+        return self.status == ExtractionStatus.SUCCESS.value and bool(self.codigo)
+
+    @property
+    def vencimento_efetivo(self) -> date | None:
+        if self.vencimento_travado:
+            return self.vencimento_data
+        return self.vencimento_manual or self.vencimento_data
 
     def detalhe_beneficiario(self) -> str:
         b = self.beneficiario
@@ -113,6 +145,8 @@ class ResultListModel(QAbstractListModel):
         if campo == "beneficiarioDetalhe":
             return item.detalhe_beneficiario()
 
+        venc = item.vencimento_efetivo
+        s = item.sincronizacao
         valores: dict[str, object] = {
             "arquivo": item.caminho.name,
             "caminho": str(item.caminho),
@@ -127,9 +161,20 @@ class ResultListModel(QAbstractListModel):
             "codigo": item.codigo,
             "mensagem": item.mensagem,
             "beneficiario": item.beneficiario.nome if item.beneficiario else "",
-            "beneficiarioDoc": item.documento,
+            "beneficiarioDoc": item.beneficiario_doc,
             "situacao": item.empresa.situacao_cadastral,
             "protegido": item.protegido,
+            "elegivel": item.elegivel,
+            "documentoErp": str(item.documento_erp) if item.documento_erp is not None else "",
+            "vencimentoTexto": venc.strftime("%d/%m/%Y") if venc else "",
+            "vencimentoIso": venc.isoformat() if venc else "",
+            "vencimentoEditavel": item.elegivel and not item.vencimento_travado,
+            "erroDocumento": item.erro_documento,
+            "erroData": item.erro_data,
+            "statusErp": s.status.value if s else "",
+            "statusErpTexto": ROTULOS[s.status] if s else "",
+            "parcelaErp": s.parcela.rotulo if s and s.parcela else "",
+            "detalheErp": s.detalhe if s else "",
         }
         return valores[campo]
 
@@ -210,6 +255,7 @@ class ResultListModel(QAbstractListModel):
         item.mensagem = " | ".join(resultado.mensagens)
         item.beneficiario = resultado.beneficiario
         item.protegido = False
+        item.sincronizacao = None  # documento_erp e data manual são preservados
 
         boleto = resultado.boleto
         if boleto is None:
@@ -224,7 +270,35 @@ class ResultListModel(QAbstractListModel):
             item.emissor = d.emissor
             item.valor = d.valor
             item.vencimento = formatar_data(d.vencimento, d.vencimento_estimado)
+            item.vencimento_data = d.vencimento
+            # Só o fator de vencimento da cobrança é confiável o bastante para travar
+            item.vencimento_travado = (
+                boleto.tipo == BoletoType.BANK_SLIP
+                and d.vencimento is not None
+                and not d.vencimento_estimado
+            )
 
+    # ---------------- Sincronização ----------------
+    def alterar(self, linha: int, **campos: object) -> None:
+        item = self.item(linha)
+        if item is None:
+            return
+        for nome, valor in campos.items():
+            setattr(item, nome, valor)
+        self._notificar(linha)
+
+    def aplicar_sincronizacao(self, por_chave: dict[str, ResultadoSincronizacao]) -> None:
+        for i, item in enumerate(self._itens):
+            if (r := por_chave.get(item.chave)) is not None:
+                item.sincronizacao = r
+                self._notificar(i)
+
+    def contar_erp(self, status: str) -> int:
+        return sum(
+            1 for i in self._itens if i.sincronizacao and i.sincronizacao.status.value == status
+        )
+
+    # ---------------- Utilitários ----------------
     def contem_codigo(self, codigo: str) -> bool:
         return any(item.codigo == codigo for item in self._itens)
 

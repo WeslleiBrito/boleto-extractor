@@ -5,9 +5,9 @@ import QtQuick.Dialogs
 
 ApplicationWindow {
     id: root
-    width: 1440
+    width: 1600
     height: 720
-    minimumWidth: 1100
+    minimumWidth: 1200
     minimumHeight: 500
     visible: true
     title: "Extrator de Boletos"
@@ -18,9 +18,17 @@ ApplicationWindow {
         review: "Revisar", error: "Erro"
     })
 
+    // Status do ERP -> cor do tema
+    readonly property var corErp: ({
+        encontrado: "success", ja_pago: "review", data_divergente: "review",
+        valor_divergente: "review", doc_inexistente: "invalid",
+        nao_encontrado: "invalid", duplicado: "error"
+    })
+
     readonly property var colunas: [
-        { t: "STATUS", w: 92 }, { t: "ARQUIVO", w: 160 }, { t: "BENEFICIÁRIO", w: 230 },
-        { t: "EMISSOR", w: 130 }, { t: "VENCIMENTO", w: 100 }, { t: "VALOR", w: 110 },
+        { t: "STATUS", w: 92 }, { t: "ARQUIVO", w: 140 }, { t: "BENEFICIÁRIO", w: 200 },
+        { t: "EMISSOR", w: 110 }, { t: "DOCUMENTO", w: 100 }, { t: "VENCIMENTO", w: 140 },
+        { t: "VALOR", w: 100 }, { t: "ERP", w: 150 },
         { t: "LINHA DIGITÁVEL", w: -1 }, { t: "", w: 90 }
     ]
 
@@ -97,6 +105,7 @@ ApplicationWindow {
 
     component ThemedInput: TextField {
         id: campo
+        property bool erro: false
         color: Theme.t.input.text
         placeholderTextColor: Theme.t.input.placeholder
         font.family: Theme.t.input.font.family
@@ -107,9 +116,10 @@ ApplicationWindow {
         background: Rectangle {
             implicitHeight: 38
             radius: Theme.t.input.radius
-            color: Theme.t.input.background
-            border.width: campo.activeFocus ? 2 : 1
-            border.color: campo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
+            color: campo.erro ? Qt.alpha(Theme.t.status.invalid, 0.10) : Theme.t.input.background
+            border.width: campo.activeFocus || campo.erro ? 2 : 1
+            border.color: campo.erro ? Theme.t.status.invalid
+                        : campo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
         }
     }
 
@@ -163,6 +173,130 @@ ApplicationWindow {
             font.family: Theme.t.table.headerFont.family
             font.pixelSize: 12
             font.weight: 700
+        }
+    }
+
+    component ErpPill: Rectangle {
+        property string chave: ""
+        property string texto: ""
+        readonly property color cor: Theme.t.status[root.corErp[chave] || "pending"]
+        implicitWidth: rotulo.implicitWidth + 18
+        implicitHeight: 22
+        radius: 11
+        color: Qt.alpha(cor, 0.18)
+        border.color: cor
+        Text {
+            id: rotulo
+            anchors.centerIn: parent
+            text: parent.texto
+            color: parent.cor
+            font.family: Theme.t.table.headerFont.family
+            font.pixelSize: 11
+            font.weight: 700
+        }
+    }
+
+    // ---------- Calendário (compartilhado por todas as linhas) ----------
+    Popup {
+        id: calendario
+        property int linha: -1
+        property int mes: 0
+        property int ano: 2026
+        width: 300
+        padding: 12
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: codigoInput.forceActiveFocus()
+
+        function abrir(linha, iso, origem) {
+            const d = iso ? new Date(iso + "T12:00:00") : new Date()
+            calendario.linha = linha
+            calendario.mes = d.getMonth()
+            calendario.ano = d.getFullYear()
+            const p = origem.mapToItem(root.contentItem, 0, origem.height + 4)
+            calendario.x = Math.min(p.x, root.width - calendario.width - 10)
+            calendario.y = Math.min(p.y, root.height - 320)
+            calendario.open()
+        }
+        function mover(delta) {
+            let m = calendario.mes + delta
+            calendario.ano += Math.floor(m / 12)
+            calendario.mes = ((m % 12) + 12) % 12
+        }
+        function escolher(d) {
+            const dd = String(d.getDate()).padStart(2, "0")
+            const mm = String(d.getMonth() + 1).padStart(2, "0")
+            viewModel.definirVencimento(calendario.linha, dd + "/" + mm + "/" + d.getFullYear())
+            calendario.close()
+        }
+
+        background: Rectangle {
+            color: Theme.t.surface
+            radius: 10
+            border.color: Theme.t.accent
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 6
+
+            RowLayout {
+                Layout.fillWidth: true
+                ThemedButton { text: "‹"; secundario: true; implicitWidth: 36; implicitHeight: 30; onClicked: calendario.mover(-1) }
+                ThemedText {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    estilo: Theme.t.subtitle
+                    text: Qt.locale("pt_BR").standaloneMonthName(calendario.mes) + " " + calendario.ano
+                }
+                ThemedButton { text: "›"; secundario: true; implicitWidth: 36; implicitHeight: 30; onClicked: calendario.mover(1) }
+            }
+
+            DayOfWeekRow {
+                Layout.fillWidth: true
+                locale: Qt.locale("pt_BR")
+                delegate: Text {
+                    required property string shortName
+                    text: shortName
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.t.subtitle.color
+                    font.pixelSize: 11
+                }
+            }
+
+            MonthGrid {
+                id: grade
+                Layout.fillWidth: true
+                month: calendario.mes
+                year: calendario.ano
+                locale: Qt.locale("pt_BR")
+                onClicked: (d) => calendario.escolher(d)
+                delegate: Rectangle {
+                    required property var model
+                    implicitHeight: 30
+                    radius: 6
+                    readonly property bool hoje: model.today
+                    color: diaHover.hovered ? Qt.alpha(Theme.t.accent, 0.25) : "transparent"
+                    border.color: hoje ? Theme.t.accent : "transparent"
+                    HoverHandler { id: diaHover }
+                    Text {
+                        anchors.centerIn: parent
+                        text: parent.model.day
+                        color: Theme.t.body.color
+                        opacity: parent.model.month === calendario.mes ? 1 : 0.35
+                        font.pixelSize: 13
+                    }
+                }
+            }
+
+            ThemedButton {
+                Layout.fillWidth: true
+                text: "Limpar data"
+                secundario: true
+                implicitHeight: 30
+                onClicked: { viewModel.definirVencimento(calendario.linha, ""); calendario.close() }
+            }
         }
     }
 
@@ -676,6 +810,13 @@ ApplicationWindow {
 
             ThemedButton { text: "＋ Adicionar"; onClicked: abrirDialog.open() }
             ThemedButton {
+                text: viewModel.cruzando ? "Consultando…" : "🔗 Cruzar ERP"
+                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.cruzando
+                onClicked: viewModel.cruzar()
+                ToolTip.visible: hovered && !viewModel.erpConfigurado
+                ToolTip.text: "Ative o MySQL (ERP) nas configurações ⚙"
+            }
+            ThemedButton {
                 text: "Exportar CSV"
                 secundario: true
                 enabled: viewModel.quantidade > 0 && !viewModel.processando
@@ -684,7 +825,7 @@ ApplicationWindow {
             ThemedButton {
                 text: "Limpar"
                 secundario: true
-                enabled: viewModel.quantidade > 0 && !viewModel.processando
+                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.cruzando
                 onClicked: { viewModel.limpar(); codigoInput.forceActiveFocus() }
             }
             ThemedButton {
@@ -791,6 +932,7 @@ ApplicationWindow {
 
                     delegate: Rectangle {
                         id: linhaItem
+                        required property var model
                         required property int index
                         required property string arquivo
                         required property string caminho
@@ -808,9 +950,29 @@ ApplicationWindow {
                         required property string situacao
                         required property string beneficiarioDetalhe
                         required property bool protegido
+                        // Cruzamento
+                        required property bool elegivel
+                        required property string vencimentoTexto
+                        required property string vencimentoIso
+                        required property bool vencimentoEditavel
+                        required property bool erroDocumento
+                        required property bool erroData
+                        required property string statusErp
+                        required property string statusErpTexto
+                        required property string parcelaErp
+                        required property string detalheErp
+
+                        // Compatível com o role antigo (pagCod) e o novo (documentoErp)
+                        readonly property string pagCod:
+                            model.pagCod !== undefined ? (model.pagCod || "")
+                            : (model.documentoErp !== undefined ? (model.documentoErp || "") : "")
 
                         readonly property bool situacaoAlerta:
                             situacao.length > 0 && situacao.toUpperCase() !== "ATIVA"
+
+                        // Mantém os campos sincronizados com o modelo após cada edição
+                        onPagCodChanged: if (!docInput.activeFocus) docInput.text = pagCod
+                        onVencimentoTextoChanged: if (!dataInput.activeFocus) dataInput.text = vencimentoTexto
 
                         width: lista.width
                         height: 56
@@ -819,11 +981,14 @@ ApplicationWindow {
 
                         HoverHandler { id: hover }
 
-                        ToolTip.visible: hover.hovered
+                        ToolTip.visible: hover.hovered && !docInput.activeFocus && !dataInput.activeFocus
                         ToolTip.delay: 600
                         ToolTip.text: caminho
                             + (tipo ? "\nTipo: " + tipo : "")
                             + (beneficiarioDetalhe ? "\n\n" + beneficiarioDetalhe : "")
+                            + (statusErpTexto ? "\n\nERP: " + statusErpTexto
+                               + (parcelaErp ? " · " + parcelaErp : "")
+                               + (detalheErp ? "\n" + detalheErp : "") : "")
                             + (mensagem ? "\n\n" + mensagem : "")
 
                         RowLayout {
@@ -834,14 +999,14 @@ ApplicationWindow {
 
                             StatusPill { status: linhaItem.status; Layout.preferredWidth: 92 }
                             ThemedText {
-                                Layout.preferredWidth: 160
+                                Layout.preferredWidth: 140
                                 text: (linhaItem.protegido ? "🔒 " : "") + linhaItem.arquivo
                                     + (linhaItem.pagina > 0 ? "  · p." + linhaItem.pagina : "")
                             }
 
                             ColumnLayout {
-                                Layout.preferredWidth: 230
-                                Layout.maximumWidth: 230
+                                Layout.preferredWidth: 200
+                                Layout.maximumWidth: 200
                                 spacing: 1
                                 ThemedText {
                                     Layout.fillWidth: true
@@ -861,13 +1026,106 @@ ApplicationWindow {
                                 }
                             }
 
-                            ThemedText { text: linhaItem.emissor || "—"; Layout.preferredWidth: 130 }
-                            ThemedText { text: linhaItem.vencimento || "—"; Layout.preferredWidth: 100 }
+                            ThemedText { text: linhaItem.emissor || "—"; Layout.preferredWidth: 110 }
+
+                            // ---- Documento (pag_cod) ----
+                            Item {
+                                Layout.preferredWidth: 100
+                                implicitHeight: 34
+                                ThemedInput {
+                                    id: docInput
+                                    anchors.fill: parent
+                                    visible: linhaItem.elegivel
+                                    enabled: !viewModel.cruzando
+                                    erro: linhaItem.erroDocumento
+                                    text: linhaItem.pagCod
+                                    placeholderText: "pag_cod"
+                                    font.family: Theme.t.mono.font.family
+                                    leftPadding: 8
+                                    maximumLength: 10
+                                    validator: RegularExpressionValidator { regularExpression: /[0-9]{0,10}/ }
+                                    onEditingFinished: viewModel.definirDocumento(linhaItem.index, text)
+                                    onAccepted: dataInput.visible && !dataInput.readOnly
+                                        ? dataInput.forceActiveFocus() : codigoInput.forceActiveFocus()
+                                }
+                                ThemedText { anchors.verticalCenter: parent.verticalCenter; visible: !linhaItem.elegivel; text: "—" }
+                            }
+
+                            // ---- Vencimento (travado ou editável + calendário) ----
+                            RowLayout {
+                                Layout.preferredWidth: 140
+                                Layout.maximumWidth: 140
+                                spacing: 4
+                                ThemedInput {
+                                    id: dataInput
+                                    Layout.fillWidth: true
+                                    implicitHeight: 34
+                                    visible: linhaItem.elegivel
+                                    readOnly: !linhaItem.vencimentoEditavel
+                                    enabled: !viewModel.cruzando
+                                    erro: linhaItem.erroData
+                                    text: linhaItem.vencimentoTexto
+                                    placeholderText: "dd/mm/aaaa"
+                                    font.family: Theme.t.mono.font.family
+                                    leftPadding: 8
+                                    maximumLength: 10
+                                    validator: RegularExpressionValidator { regularExpression: /[0-9\/]{0,10}/ }
+                                    // Insere as barras automaticamente
+                                    onTextEdited: {
+                                        const d = text.replace(/\D/g, "").slice(0, 8)
+                                        let f = d
+                                        if (d.length > 4) f = d.slice(0, 2) + "/" + d.slice(2, 4) + "/" + d.slice(4)
+                                        else if (d.length > 2) f = d.slice(0, 2) + "/" + d.slice(2)
+                                        if (f !== text) text = f
+                                    }
+                                    onEditingFinished: if (!readOnly) {
+                                        viewModel.definirVencimento(linhaItem.index, text)
+                                        text = linhaItem.vencimentoTexto
+                                    }
+                                    onAccepted: codigoInput.forceActiveFocus()
+                                    ToolTip.visible: readOnly && hovered
+                                    ToolTip.text: "Vencimento lido do código de barras (bloqueado)"
+                                }
+                                ThemedButton {
+                                    visible: linhaItem.elegivel && linhaItem.vencimentoEditavel
+                                    enabled: !viewModel.cruzando
+                                    text: "📅"
+                                    secundario: true
+                                    implicitWidth: 34
+                                    implicitHeight: 34
+                                    onClicked: calendario.abrir(linhaItem.index, linhaItem.vencimentoIso, this)
+                                }
+                                ThemedText {
+                                    visible: !linhaItem.elegivel
+                                    text: linhaItem.vencimento || "—"
+                                }
+                            }
+
                             ThemedText {
                                 text: linhaItem.valor || "—"
-                                Layout.preferredWidth: 110
+                                Layout.preferredWidth: 100
                                 estilo: linhaItem.valor ? Theme.t.mono : Theme.t.body
                             }
+
+                            // ---- Resultado do ERP ----
+                            ColumnLayout {
+                                Layout.preferredWidth: 150
+                                Layout.maximumWidth: 150
+                                spacing: 2
+                                ErpPill {
+                                    visible: linhaItem.statusErp.length > 0
+                                    chave: linhaItem.statusErp
+                                    texto: linhaItem.statusErpTexto
+                                }
+                                ThemedText {
+                                    Layout.fillWidth: true
+                                    estilo: Theme.t.subtitle
+                                    font.pixelSize: 11
+                                    text: linhaItem.statusErp ? (linhaItem.parcelaErp || linhaItem.detalheErp)
+                                                              : (linhaItem.elegivel ? "Não cruzado" : "—")
+                                }
+                            }
+
                             ThemedText {
                                 Layout.fillWidth: true
                                 text: linhaItem.linhaFormatada || linhaItem.mensagem

@@ -12,6 +12,7 @@ from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import ZXingBa
 from boleto_extractor.infrastructure.cnpj.bigquery_cnpj_client import BigQueryCnpjClient
 from boleto_extractor.infrastructure.cnpj.fallback_cnpj_lookup import FallbackCnpjLookup
 from boleto_extractor.infrastructure.cnpj.opencnpj_client import OpenCnpjClient
+from boleto_extractor.infrastructure.erp.erp_parcela_repository import ErpParcelaRepository
 from boleto_extractor.infrastructure.pdf.local_document_loader import LocalDocumentLoader
 from boleto_extractor.infrastructure.pdf.pymupdf_text_extractor import PyMuPdfTextExtractor
 from boleto_extractor.presentation.themes.theme_manager import ThemeManager
@@ -42,8 +43,22 @@ class DesktopApplication:
             text_extractor=PyMuPdfTextExtractor(),
             cnpj_lookup=cnpj_lookup,
         )
+
+        # Repositório ERP: config e senha (tela ou cofre do Windows) lidas a cada conexão
+        repositorio = ErpParcelaRepository(
+            self._settings.valores,
+            self._settings.senha_mysql,
+        )
+
         self._theme = ThemeManager(self._application)
-        self._viewmodel = MainViewModel(use_case)
+        self._viewmodel = MainViewModel(
+            use_case,
+            repositorio=repositorio,
+            erp_ativo=lambda: bool(self._settings.dbAtivo),
+        )
+
+        # Qualquer mudança nas configurações atualiza o estado do ERP na tela
+        self._settings.alterado.connect(self._viewmodel.atualizarErp)
 
         contexto = self._engine.rootContext()
         contexto.setContextProperty("Theme", self._theme)

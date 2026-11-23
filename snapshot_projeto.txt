@@ -1,29 +1,35 @@
 # ESTRUTURA DO PROJETO
 
-boleto_extractor/
+boleto-extractor/
 main.py
-    extrator_boletos.spec
     launcher.py
     version_info.txt
 pyproject.toml
 README.md
+requirements.txt
         __init__.py
         __main__.py
             __init__.py
                 __init__.py
                 barcode_reader.py
+                cnpj_lookup.py
                 document_loader.py
+                text_extractor.py
                 __init__.py
                     __init__.py
                     barcode_to_digitable_line.py
                     digitable_line_to_barcode.py
                     validator.py
+                beneficiario_extractor.py
                 boleto_parser.py
                     __init__.py
                     barcode_to_digitable_line.py
                     digitable_line_to_barcode.py
                     validator.py
                 code_normalizer.py
+                documento_validator.py
+                matching_service.py
+                vencimento_service.py
                 __init__.py
                 extract_boleto.py
         bootstrap.py
@@ -33,6 +39,7 @@ README.md
             types.py
             __init__.py
                 __init__.py
+                beneficiario.py
                 boleto.py
                 boleto_details.py
                 extraction_result.py
@@ -43,13 +50,24 @@ README.md
                 __init__.py
                 zxing_barcode_reader.py
                 __init__.py
+                bigquery_cnpj_client.py
+                composite_cnpj_lookup.py
+                fallback_cnpj_lookup.py
+                opencnpj_client.py
+                sqlite_cnpj_cache.py
+                erp_parcela_repository.py
+                __init__.py
                 image_processor.py
                 __init__.py
                 local_document_loader.py
+                pdf_senha.py
+                pymupdf_text_extractor.py
             __init__.py
             app.py
+            boleto_list_model.py
             formatting.py
                 __init__.py
+                Main.txt
                 __init__.py
                 catalog.py
                 theme.py
@@ -58,10 +76,12 @@ README.md
                 extraction_worker.py
                 main_viewmodel.py
                 result_list_model.py
+                settings_viewmodel.py
 test_real_barcode.py
     __init__.py
         __init__.py
         test_real_boleto.py
+    test_beneficiario.py
         __init__.py
                     test_cobranca_barcode_to_digitable_line.py
         test_barcode_reader.py
@@ -87,63 +107,6 @@ from boleto_extractor.bootstrap import run
 
 if __name__ == "__main__":
     raise SystemExit(run())
-
-
-================================================================================
-ARQUIVO: packaging/extrator_boletos.spec
-================================================================================
-# -*- mode: python ; coding: utf-8 -*-
-from pathlib import Path
-
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
-
-ROOT = Path(SPECPATH).parent
-SRC = ROOT / "src"
-PKG = SRC / "boleto_extractor"
-icon=str(ROOT / "packaging" / "icone.ico"),
-
-datas = [
-    (str(PKG / "presentation" / "qml"), "boleto_extractor/presentation/qml"),
-]
-datas += collect_data_files("pymupdf")
-
-binaries = collect_dynamic_libs("zxingcpp")
-
-a = Analysis(
-    [str(PKG / "__main__.py")],
-    pathex=[str(SRC)],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=[
-        "PySide6.QtQml",
-        "PySide6.QtQuick",
-        "PySide6.QtQuickControls2",
-        "zxingcpp",
-        "fitz",
-    ],
-    excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.Qt3DCore"],
-    noarchive=False,
-)
-
-pyz = PYZ(a.pure)
-
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="ExtratorBoletos",
-    console=False,
-    upx=False,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    upx=False,
-    name="ExtratorBoletos",
-)
 
 
 ================================================================================
@@ -200,12 +163,24 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3",
-    "pytest-cov>=6.0",
-    "mypy>=1.14",
-    "ruff>=0.9",
-    "pyinstaller>=6.11",
+    "pytest>=9.2",
+    "pytest-cov>=7.1",
+    "pytest-qt>=4.4",
+    "pytest-mock>=3.14",
+    "mypy>=2.4",
+    "ruff>=0.17",
+    "pre-commit>=4.0",
+    "pyinstaller>=6.22",
+    "types-PyYAML",
+    "types-requests",
+    "types-python-dateutil",
+    "pymysql>=1.2.4",
+    "keyring",
+    "types-PyMySQL",
+    "types-tabulate",
+    "pandas-stubs",
 ]
+
 
 [project.scripts]
 boleto-extractor = "boleto_extractor.bootstrap:run"
@@ -242,6 +217,135 @@ packages = ["boleto_extractor"]
 ARQUIVO: README.md
 ================================================================================
 # boleto-extractor
+
+================================================================================
+ARQUIVO: requirements.txt
+================================================================================
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+aistudio_sdk==0.3.9
+altgraph==0.17.5
+annotated-types==0.8.0
+anyio==4.12.1
+ast_serialize==0.13.1
+attrs==26.1.0
+bce-python-sdk==0.9.79
+-e git+https://github.com/WeslleiBrito/boleto-extractor.git@9f77d284255d38668b0068f0324d3faf904cf506#egg=boleto_extractor
+certifi==2026.1.4
+cffi==2.1.1
+chardet==7.7.0
+charset-normalizer==3.5.2
+click==8.5.1
+colorama==0.4.6
+colorlog==6.12.0
+coverage==7.17.3
+crc32c==2.9.post0
+cryptography==50.0.2
+filelock==4.2.12
+flatbuffers==25.12.19
+frozenlist==1.8.0
+fsspec==2026.9.0
+future==1.0.0
+google-api-core==2.44.0
+google-auth==2.63.0
+google-cloud-bigquery==3.47.0
+google-cloud-core==2.8.0
+google-crc32c==1.9.0
+google-resumable-media==2.11.0
+googleapis-common-protos==1.76.0
+grpcio==1.85.3
+grpcio-status==1.85.3
+h11==0.16.0
+hf-xet==1.8.0
+httpcore==1.0.9
+httpcore2==2.16.2
+httpx==0.28.1
+httpx2==2.16.2
+huggingface_hub==2.4.0
+idna==3.20
+imagesize==2.0.1
+iniconfig==2.3.1
+jaraco.classes==3.4.0
+jaraco.context==6.1.2
+jaraco.functools==4.6.0
+keyring==25.7.0
+librt==0.16.0
+modelscope==1.40.3
+modelscope-hub==0.7.1
+more-itertools==11.2.1
+multidict==7.2.1
+mypy==2.4.1
+mypy_extensions==1.2.0
+networkx==3.7
+numpy==2.3.5
+onnxruntime==1.32.0
+opencv-contrib-python==4.10.0.84
+opencv-python-headless==5.1.0.95
+opentelemetry-api==1.45.2
+opt-einsum==3.3.0
+packaging==26.3
+paddleocr==3.7.0
+paddlepaddle==3.2.0
+paddlex==3.7.2
+pandas==3.1.1
+pathspec==1.1.1
+pefile==2024.8.26
+pillow==12.1.0
+pluggy==1.7.0
+prettytable==3.19.0
+propcache==0.5.4
+proto-plus==1.29.0
+protobuf==7.36.2
+psutil==7.2.2
+py-cpuinfo==9.0.0
+pyasn1==0.6.5
+pyasn1_modules==0.4.2
+pyclipper==1.4.0
+pycparser==3.12
+pycryptodome==4.5.0
+pydantic==2.14.3
+pydantic_core==2.50.4
+Pygments==2.21.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
+pymupdf==2.1
+pymupdf4llm==2.1
+pymupdf_layout==2.1
+PyMySQL==1.2.4
+pypdfium2==5.15.2
+PySide6==6.12.0
+PySide6_Addons==6.12.0
+PySide6_Essentials==6.12.0
+PySide6_Pdf==6.12.0.140
+PySide6_WebEngine==6.12.0.140
+pytest==9.2.0
+pytest-cov==7.1.0
+python-bidi==0.6.12
+python-dateutil==2.9.0.post0
+pywin32-ctypes==0.2.3
+PyYAML==6.0.2
+requests==2.34.2
+ruamel.yaml==0.19.1
+ruff==0.17.5
+safetensors==0.7.0
+setuptools==84.2.1
+shapely==2.2.0
+shiboken6==6.12.0
+six==1.17.0
+tabulate==0.10.0
+tqdm==4.70.1
+truststore==0.10.5
+typing-inspection==0.4.5
+typing_extensions==4.16.0
+tzdata==2026.6
+ujson==6.1.0
+urllib3==2.8.0
+wcwidth==0.9.4
+wheel==0.48.0
+yarl==1.25.1
+zxing-cpp==3.1.1
+
 
 ================================================================================
 ARQUIVO: src/boleto_extractor/__init__.py
@@ -293,6 +397,21 @@ class BarcodeReader(Protocol):
 
 
 ================================================================================
+ARQUIVO: src/boleto_extractor/application/ports/cnpj_lookup.py
+================================================================================
+from typing import Protocol
+
+from boleto_extractor.domain.entities.beneficiario import DadosEmpresa
+
+
+class CnpjLookup(Protocol):
+    """Consulta dados de um CNPJ. Retorna None em qualquer falha, sem lançar exceção."""
+
+    def consultar(self, cnpj: str) -> DadosEmpresa | None:
+        ...
+
+
+================================================================================
 ARQUIVO: src/boleto_extractor/application/ports/document_loader.py
 ================================================================================
 
@@ -312,6 +431,20 @@ class DocumentLoader(Protocol):
 
         Cada página é disponibilizada individualmente na memória.
         """
+        ...
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/ports/text_extractor.py
+================================================================================
+from pathlib import Path
+from typing import Protocol
+
+
+class TextExtractor(Protocol):
+    """Contrato para extração de texto por página. Nunca deve lançar exceção."""
+
+    def extrair_paginas(self, arquivo: Path) -> tuple[str, ...]:
         ...
 
 
@@ -440,6 +573,88 @@ ARQUIVO: src/boleto_extractor/application/services/arrecadacao/digitable_line_to
 ================================================================================
 ARQUIVO: src/boleto_extractor/application/services/arrecadacao/validator.py
 ================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/beneficiario_extractor.py
+================================================================================
+import re
+from dataclasses import dataclass
+
+from boleto_extractor.application.services.documento_validator import (
+    cnpj_valido,
+    cpf_valido,
+    limpar,
+)
+
+_RE_CNPJ = re.compile(
+    r"(?<![A-Z0-9])[A-Z0-9]{2}\.?[A-Z0-9]{3}\.?[A-Z0-9]{3}/?[A-Z0-9]{4}-?\d{2}(?![A-Z0-9])"
+)
+_RE_CPF = re.compile(r"(?<![A-Z0-9])\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?![A-Z0-9])")
+
+_ROTULOS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("beneficiario", re.compile(r"BENEFICI[AÁ]RIO|CEDENTE")),
+    ("avalista", re.compile(r"SACADOR|AVALISTA")),
+    ("pagador", re.compile(r"PAGADOR|\bSACADO\b")),
+)
+_JANELA = 400
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentoEncontrado:
+    documento: str
+    tipo: str
+    papel: str
+    posicao: int
+    confirmado_pelo_codigo: bool = False
+
+
+class BeneficiarioExtractor:
+    """Localiza o CPF/CNPJ do beneficiário no texto do boleto."""
+
+    def extrair(self, texto: str, raiz_cnpj: str | None = None) -> DocumentoEncontrado | None:
+        try:
+            docs = self._todos(texto)
+        except Exception:
+            return None
+
+        if raiz_cnpj:
+            for d in docs:
+                if d.tipo == "CNPJ" and d.documento.startswith(raiz_cnpj):
+                    return DocumentoEncontrado(
+                        d.documento, d.tipo, d.papel, d.posicao, confirmado_pelo_codigo=True
+                    )
+
+        criterios = (
+            lambda d: d.papel == "beneficiario",
+            lambda d: d.papel == "desconhecido" and d.tipo == "CNPJ",
+            lambda d: d.papel == "desconhecido",
+        )
+        for criterio in criterios:
+            for d in docs:
+                if criterio(d):
+                    return d
+        return None
+
+    def _todos(self, texto: str) -> list[DocumentoEncontrado]:
+        t = (texto or "").upper()
+        rotulos = sorted((m.start(), p) for p, rx in _ROTULOS for m in rx.finditer(t))
+
+        def papel_de(pos: int) -> str:
+            antes = [r for p, r in rotulos if p < pos and pos - p <= _JANELA]
+            return antes[-1] if antes else "desconhecido"
+
+        achados: list[DocumentoEncontrado] = []
+        vistos: set[str] = set()
+        buscas = ((_RE_CNPJ, "CNPJ", cnpj_valido), (_RE_CPF, "CPF", cpf_valido))
+        for rx, tipo, valida in buscas:
+            for m in rx.finditer(t):
+                doc = limpar(m.group())
+                if doc in vistos or not valida(doc):
+                    continue
+                vistos.add(doc)
+                achados.append(DocumentoEncontrado(doc, tipo, papel_de(m.start()), m.start()))
+        return sorted(achados, key=lambda d: d.posicao)
 
 
 ================================================================================
@@ -751,6 +966,222 @@ class CodeNormalizer:
 
 
 ================================================================================
+ARQUIVO: src/boleto_extractor/application/services/documento_validator.py
+================================================================================
+import re
+
+_NAO_ALNUM = re.compile(r"[^A-Z0-9]")
+
+
+def limpar(valor: str) -> str:
+    return _NAO_ALNUM.sub("", (valor or "").upper())
+
+
+def cpf_valido(cpf: str) -> bool:
+    d = re.sub(r"\D", "", cpf or "")
+    if len(d) != 11 or d == d[0] * 11:
+        return False
+    for n in (9, 10):
+        soma = sum(int(d[i]) * (n + 1 - i) for i in range(n))
+        if (soma * 10 % 11) % 10 != int(d[n]):
+            return False
+    return True
+
+
+def _dv_cnpj(base: str) -> str:
+    """DV do CNPJ numérico ou alfanumérico (valor = ASCII - 48; pesos 2..9)."""
+    soma = sum((ord(c) - 48) * ((i % 8) + 2) for i, c in enumerate(reversed(base)))
+    resto = soma % 11
+    return "0" if resto < 2 else str(11 - resto)
+
+
+def cnpj_valido(cnpj: str) -> bool:
+    c = limpar(cnpj)
+    if not re.fullmatch(r"[A-Z0-9]{12}\d{2}", c) or c == c[0] * 14:
+        return False
+    dv1 = _dv_cnpj(c[:12])
+    return c[12:] == dv1 + _dv_cnpj(c[:12] + dv1)
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/matching_service.py
+================================================================================
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from enum import Enum
+
+from boleto_extractor.infrastructure.erp.erp_parcela_repository import ParcelaErp
+
+_TOL = Decimal("0.01")
+
+
+class StatusCruzamento(str, Enum):
+    ENCONTRADO = "encontrado"
+    JA_PAGO = "ja_pago"
+    DATA_DIVERGENTE = "data_divergente"
+    VALOR_DIVERGENTE = "valor_divergente"
+    DOC_INEXISTENTE = "doc_inexistente"
+    NAO_ENCONTRADO = "nao_encontrado"
+    DUPLICADO = "duplicado"
+
+
+ROTULOS = {
+    StatusCruzamento.ENCONTRADO: "Encontrado",
+    StatusCruzamento.JA_PAGO: "Já pago",
+    StatusCruzamento.DATA_DIVERGENTE: "Data divergente",
+    StatusCruzamento.VALOR_DIVERGENTE: "Valor divergente",
+    StatusCruzamento.DOC_INEXISTENTE: "Doc. inexistente",
+    StatusCruzamento.NAO_ENCONTRADO: "Não encontrado",
+    StatusCruzamento.DUPLICADO: "Duplicado",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ItemCruzamento:
+    chave: str          # identificador da linha (código de barras)
+    documento: int      # pag_cod
+    vencimento: date
+    valor: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoCruzamento:
+    chave: str
+    status: StatusCruzamento
+    parcela: ParcelaErp | None
+    detalhe: str
+
+
+def _br(d: date | None) -> str:
+    return d.strftime("%d/%m/%Y") if d else "--"
+
+
+def _moeda(v: Decimal) -> str:
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _valor_confere(p: ParcelaErp, valor: Decimal) -> bool:
+    return abs(p.valor_documento - valor) <= _TOL or abs(p.saldo - valor) <= _TOL
+
+
+def cruzar(itens: list[ItemCruzamento],
+           parcelas_por_conta: dict[int, list[ParcelaErp]]) -> list[ResultadoCruzamento]:
+    usadas: set[int] = set()
+    saida: list[ResultadoCruzamento] = []
+
+    for it in itens:
+        parcelas = parcelas_por_conta.get(it.documento, [])
+        if not parcelas:
+            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.DOC_INEXISTENTE, None,
+                                             f"Documento {it.documento} não existe no ERP"))
+            continue
+
+        exatas = [p for p in parcelas if p.vencimento == it.vencimento and _valor_confere(p, it.valor)]
+        livres = [p for p in exatas if p.cod not in usadas]
+
+        if livres:
+            abertas = [p for p in livres if not p.pago]
+            escolhida = (abertas or livres)[0]
+            usadas.add(escolhida.cod)
+            if escolhida.pago:
+                saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.JA_PAGO, escolhida,
+                                                 "Parcela já baixada no ERP"))
+            else:
+                saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.ENCONTRADO, escolhida,
+                                                 f"Saldo {_moeda(escolhida.saldo)}"))
+            continue
+
+        if exatas:
+            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.DUPLICADO, exatas[0],
+                                             "Parcela já usada por outro boleto do lote"))
+            continue
+
+        mesmo_valor = [p for p in parcelas if _valor_confere(p, it.valor) and not p.pago]
+        if mesmo_valor:
+            datas = ", ".join(_br(p.vencimento) for p in mesmo_valor[:6])
+            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.DATA_DIVERGENTE, None,
+                                             f"Vencimentos com esse valor: {datas}"))
+            continue
+
+        mesma_data = [p for p in parcelas if p.vencimento == it.vencimento]
+        if mesma_data:
+            valores = ", ".join(_moeda(p.valor_documento) for p in mesma_data[:4])
+            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.VALOR_DIVERGENTE, None,
+                                             f"Valor no ERP: {valores}"))
+            continue
+
+        saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.NAO_ENCONTRADO, None,
+                                         f"{len(parcelas)} parcela(s) no documento, nenhuma confere"))
+    return saida
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/vencimento_service.py
+================================================================================
+from __future__ import annotations
+
+import re
+from datetime import date, datetime, timedelta
+
+_BASE_ANTIGA = date(1997, 10, 7)    # fator 0000
+_BASE_NOVA = date(2025, 2, 22)      # fator 1000 após o reinício
+_RE_VENC = re.compile(r"venc\w*\D{0,30}?(\d{2})[/.-](\d{2})[/.-](\d{4})", re.I | re.S)
+
+
+def _por_fator(codigo: str, hoje: date) -> date | None:
+    fator = int(codigo[5:9])
+    if fator == 0:
+        return None
+    antiga = _BASE_ANTIGA + timedelta(days=fator)
+    nova = _BASE_NOVA + timedelta(days=fator - 1000)
+    return min((antiga, nova), key=lambda d: abs((d - hoje).days))
+
+
+def _por_texto(texto: str) -> date | None:
+    for d, m, a in _RE_VENC.findall(texto or ""):
+        try:
+            return datetime(int(a), int(m), int(d)).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _por_campo_livre(codigo: str, hoje: date) -> date | None:
+    livre = codigo[19:]
+    for i in range(len(livre) - 7):
+        trecho = livre[i:i + 8]
+        if not trecho.startswith("20"):
+            continue
+        try:
+            d = datetime.strptime(trecho, "%Y%m%d").date()
+        except ValueError:
+            continue
+        if abs((d - hoje).days) <= 366:
+            return d
+    return None
+
+
+def extrair_vencimento(codigo_barras: str, texto_pdf: str = "",
+                       hoje: date | None = None) -> tuple[date | None, str]:
+    """Retorna (data, origem) com origem em: 'codigo', 'pdf' ou ''."""
+    hoje = hoje or date.today()
+    cod = re.sub(r"\D", "", codigo_barras or "")
+    if len(cod) != 44:
+        return _por_texto(texto_pdf), "pdf" if _por_texto(texto_pdf) else ""
+
+    if not cod.startswith("8") and (d := _por_fator(cod, hoje)):
+        return d, "codigo"
+    if d := _por_texto(texto_pdf):
+        return d, "pdf"
+    if cod.startswith("8") and (d := _por_campo_livre(cod, hoje)):
+        return d, "pdf"
+    return None, ""
+
+
+================================================================================
 ARQUIVO: src/boleto_extractor/application/use_cases/__init__.py
 ================================================================================
 from pathlib import Path
@@ -848,19 +1279,24 @@ class ExtractBoletoUseCase:
 ================================================================================
 ARQUIVO: src/boleto_extractor/application/use_cases/extract_boleto.py
 ================================================================================
+from dataclasses import replace
 from pathlib import Path
 
 from boleto_extractor.application.ports.barcode_reader import BarcodeReader
+from boleto_extractor.application.ports.cnpj_lookup import CnpjLookup
 from boleto_extractor.application.ports.document_loader import DocumentLoader
+from boleto_extractor.application.ports.text_extractor import TextExtractor
 from boleto_extractor.application.services.arrecadacao.barcode_to_digitable_line import (
     BarcodeToDigitableLine as ArrecadacaoConverter,
 )
+from boleto_extractor.application.services.beneficiario_extractor import BeneficiarioExtractor
 from boleto_extractor.application.services.boleto_parser import BoletoParser
 from boleto_extractor.application.services.cobranca.barcode_to_digitable_line import (
     BarcodeToDigitableLine as CobrancaConverter,
 )
 from boleto_extractor.application.services.code_normalizer import CodeNormalizer
 from boleto_extractor.core.exceptions import BoletoExtractorError, BoletoValidationError
+from boleto_extractor.domain.entities.beneficiario import Beneficiario
 from boleto_extractor.domain.entities.boleto import Boleto
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.boleto_type import BoletoType
@@ -879,6 +1315,9 @@ class ExtractBoletoUseCase:
         cobranca: CobrancaConverter | None = None,
         arrecadacao: ArrecadacaoConverter | None = None,
         parser: BoletoParser | None = None,
+        text_extractor: TextExtractor | None = None,
+        cnpj_lookup: CnpjLookup | None = None,
+        beneficiario_extractor: BeneficiarioExtractor | None = None,
     ) -> None:
         self._loader = loader
         self._reader = reader
@@ -886,6 +1325,9 @@ class ExtractBoletoUseCase:
         self._arrecadacao = arrecadacao or ArrecadacaoConverter()
         self._parser = parser or BoletoParser()
         self._normalizer = CodeNormalizer(self._cobranca, self._arrecadacao)
+        self._text_extractor = text_extractor
+        self._cnpj_lookup = cnpj_lookup
+        self._benef_extractor = beneficiario_extractor or BeneficiarioExtractor()
 
     def executar(self, arquivo: Path) -> tuple[ExtractionResult, ...]:
         resultados: list[ExtractionResult] = []
@@ -920,7 +1362,7 @@ class ExtractBoletoUseCase:
                 )
             )
 
-        return tuple(resultados)
+        return tuple(self._enriquecer(arquivo, resultados))
 
     def executar_codigo(self, texto: str, origem: Path = ORIGEM_MANUAL) -> ExtractionResult:
         """Processa um código vindo do leitor USB ou digitado (44, 47 ou 48 dígitos)."""
@@ -935,6 +1377,66 @@ class ExtractBoletoUseCase:
 
         return self._processar(origem, None, codigo)
 
+    # ---------------- Beneficiário ----------------
+    def _enriquecer(
+        self, arquivo: Path, resultados: list[ExtractionResult]
+    ) -> list[ExtractionResult]:
+        """Anexa o beneficiário. Qualquer falha mantém o resultado original."""
+        if self._text_extractor is None:
+            return resultados
+        if not any(r.status == ExtractionStatus.SUCCESS for r in resultados):
+            return resultados
+
+        try:
+            paginas = self._text_extractor.extrair_paginas(arquivo)
+        except Exception:
+            return resultados
+        if not any(paginas):
+            return resultados
+
+        texto_total = "\n".join(paginas)
+        saida: list[ExtractionResult] = []
+        for r in resultados:
+            texto = texto_total
+            if r.pagina and 0 < r.pagina <= len(paginas) and paginas[r.pagina - 1]:
+                texto = paginas[r.pagina - 1]
+            saida.append(self._com_beneficiario(r, texto))
+        return saida
+
+    def _com_beneficiario(self, resultado: ExtractionResult, texto: str) -> ExtractionResult:
+        if resultado.status != ExtractionStatus.SUCCESS or resultado.boleto is None:
+            return resultado
+        try:
+            achado = self._benef_extractor.extrair(texto, self._raiz_cnpj(resultado.boleto))
+            if achado is None:
+                return resultado
+
+            empresa = None
+            if achado.tipo == "CNPJ" and self._cnpj_lookup is not None:
+                empresa = self._cnpj_lookup.consultar(achado.documento)
+
+            return replace(
+                resultado,
+                beneficiario=Beneficiario(
+                    documento=achado.documento,
+                    tipo=achado.tipo,
+                    empresa=empresa,
+                    confirmado_pelo_codigo=achado.confirmado_pelo_codigo,
+                ),
+            )
+        except Exception:
+            return resultado
+
+    @staticmethod
+    def _raiz_cnpj(boleto: Boleto) -> str | None:
+        """Arrecadação segmento 6: posições 16-23 trazem a raiz do CNPJ."""
+        if boleto.tipo != BoletoType.ARRECADACAO or not boleto.codigo_barras:
+            return None
+        if boleto.codigo_barras[1] != "6":
+            return None
+        return boleto.codigo_barras[15:23]
+
+    # ---------------- Boleto ----------------
     def _processar(self, arquivo: Path, pagina: int | None, codigo: str) -> ExtractionResult:
         try:
             boleto = self._montar_boleto(codigo)
@@ -992,7 +1494,7 @@ ARQUIVO: src/boleto_extractor/core/__init__.py
 ================================================================================
 ARQUIVO: src/boleto_extractor/core/config.py
 ================================================================================
-
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -1015,9 +1517,23 @@ class Settings(BaseModel):
     max_workers: int = 4
     dpi: int = 300
 
+    # OpenCNPJ
+    opencnpj_url: str = "https://api.opencnpj.org/{}"
+    opencnpj_timeout: float = 8.0
+    opencnpj_intervalo_min: float = 0.3
+    opencnpj_pausa_429: float = 60.0
+    cache_ttl_ok: int = 30 * 24 * 3600
+    cache_ttl_nao_encontrado: int = 7 * 24 * 3600
+
     @property
     def project_root(self) -> Path:
         return Path(__file__).resolve().parents[3]
+
+    @property
+    def data_dir(self) -> Path:
+        """Pasta de dados do usuário (sobrevive a reinstalações do app)."""
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "ExtratorBoletos"
 
 
 settings = Settings()
@@ -1063,6 +1579,52 @@ ARQUIVO: src/boleto_extractor/domain/__init__.py
 ================================================================================
 ARQUIVO: src/boleto_extractor/domain/entities/__init__.py
 ================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/domain/entities/beneficiario.py
+================================================================================
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class DadosEmpresa:
+    """Dados públicos do CNPJ (OpenCNPJ). Campos vazios quando indisponíveis."""
+
+    razao_social: str = ""
+    nome_fantasia: str = ""
+    situacao_cadastral: str = ""
+    municipio: str = ""
+    uf: str = ""
+    email: str = ""
+    telefone: str = ""
+    cnae_principal: str = ""
+    porte_empresa: str = ""
+    opcao_simples: str = ""
+    opcao_mei: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Beneficiario:
+    documento: str          # sem máscara
+    tipo: str               # "CNPJ" ou "CPF"
+    empresa: DadosEmpresa | None = None
+    confirmado_pelo_codigo: bool = False  # raiz do CNPJ bate com o código (segmento 6)
+
+    @property
+    def documento_formatado(self) -> str:
+        d = self.documento
+        if self.tipo == "CNPJ" and len(d) == 14:
+            return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+        if self.tipo == "CPF" and len(d) == 11:
+            return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+        return d
+
+    @property
+    def nome(self) -> str:
+        if not self.empresa:
+            return ""
+        return self.empresa.razao_social or self.empresa.nome_fantasia
 
 
 ================================================================================
@@ -1131,6 +1693,7 @@ ARQUIVO: src/boleto_extractor/domain/entities/extraction_result.py
 from dataclasses import dataclass
 from pathlib import Path
 
+from boleto_extractor.domain.entities.beneficiario import Beneficiario
 from boleto_extractor.domain.entities.boleto import Boleto
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
 
@@ -1143,6 +1706,7 @@ class ExtractionResult:
     confianca: float | None = None
     mensagens: tuple[str, ...] = ()
     pagina: int | None = None
+    beneficiario: Beneficiario | None = None
 
     def __post_init__(self) -> None:
         if self.confianca is not None and not 0.0 <= self.confianca <= 1.0:
@@ -1274,6 +1838,535 @@ class ZXingBarcodeReader:
 
 
 ================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/cnpj/__init__.py
+================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/cnpj/bigquery_cnpj_client.py
+================================================================================
+from __future__ import annotations
+
+import re
+import threading
+from dataclasses import dataclass
+from typing import Any, Callable, Iterable
+
+TABELA_PADRAO = "opencnpj-bigquery.public.receita"
+_PADRAO_CNPJ = re.compile(r"^[A-Z0-9]{12}\d{2}$")
+
+
+def normalizar_cnpj(valor: str | None) -> str:
+    """Remove máscara e aceita CNPJ numérico ou alfanumérico (Receita, jul/2026)."""
+    limpo = re.sub(r"[^A-Z0-9]", "", (valor or "").upper())
+    return limpo if _PADRAO_CNPJ.match(limpo) else ""
+
+
+class LimiteExcedido(RuntimeError):
+    def __init__(self, gb: float, limite: int) -> None:
+        super().__init__(
+            f"Consulta estimada em {gb:.2f} GB, acima do limite de {limite} GB. "
+            f"Aumente o limite para pelo menos {int(gb) + 1} GB."
+        )
+        self.gb = gb
+
+
+@dataclass(frozen=True)
+class DadosCnpjBigQuery:
+    cnpj: str
+    razao_social: str
+    nome_fantasia: str
+    situacao: str
+    municipio: str = ""
+    uf: str = ""
+    cnae_principal: str = ""
+    fonte: str = "BigQuery"
+
+
+class BigQueryCnpjClient:
+    """Consulta CNPJ na base pública OpenCNPJ via BigQuery."""
+
+    def __init__(self, obter_config: Callable[[], dict[str, Any]]) -> None:
+        self._obter_config = obter_config
+        self._cliente = None
+        self._assinatura: tuple | None = None
+        self._cache: dict[str, DadosCnpjBigQuery | None] = {}
+        self._lock = threading.Lock()
+        self.ultimo_gb: float = 0.0
+
+    # ---------------- Público ----------------
+    def ativo(self) -> bool:
+        cfg = self._obter_config()
+        return bool(cfg.get("bq_ativo") and cfg.get("bq_credencial"))
+
+    def consultar(self, cnpj: str) -> DadosCnpjBigQuery | None:
+        cnpj = normalizar_cnpj(cnpj)
+        if not cnpj:
+            return None
+        return self.consultar_lote([cnpj]).get(cnpj)
+
+    def consultar_lote(self, cnpjs: Iterable[str]) -> dict[str, DadosCnpjBigQuery | None]:
+        """Uma única consulta para vários CNPJs."""
+        limpos = {c for c in (normalizar_cnpj(x) for x in cnpjs) if c}
+        if not limpos or not self.ativo():
+            return {}
+
+        with self._lock:
+            faltando = sorted(c for c in limpos if c not in self._cache)
+            if faltando:
+                encontrados = self._consultar_bq(faltando)
+                for c in faltando:
+                    self._cache[c] = encontrados.get(c)
+            return {c: self._cache[c] for c in limpos}
+
+    # ---------------- Interno ----------------
+    @staticmethod
+    def _tabela(cfg: dict[str, Any]) -> str:
+        tabela = (cfg.get("bq_tabela") or TABELA_PADRAO).strip().strip("`")
+        if not re.fullmatch(r"[\w\-]+\.[\w\-]+\.[\w\-]+", tabela):
+            raise ValueError(f"Nome de tabela inválido: {tabela}")
+        return tabela
+
+    @staticmethod
+    def _limite_gb(cfg: dict[str, Any]) -> int:
+        return int(cfg.get("bq_limite_gb") or 5)
+
+    def _cliente_bq(self, cfg: dict[str, Any]):
+        from google.cloud import bigquery
+        from google.oauth2 import service_account
+
+        assinatura = (cfg["bq_credencial"], cfg.get("bq_projeto"), self._tabela(cfg))
+        if self._cliente is None or assinatura != self._assinatura:
+            cred = service_account.Credentials.from_service_account_file(cfg["bq_credencial"])
+            self._cliente = bigquery.Client(
+                credentials=cred, project=cfg.get("bq_projeto") or cred.project_id
+            )
+            self._assinatura = assinatura
+            self._cache.clear()
+        return self._cliente
+
+    def _estimar_gb(self, cliente, sql: str, params: list) -> float:
+        """Dry-run: calcula os bytes sem executar e sem cobrar."""
+        from google.cloud import bigquery
+
+        job = cliente.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=params, dry_run=True, use_query_cache=False
+            ),
+        )
+        return (job.total_bytes_processed or 0) / 1024**3
+
+    def _consultar_bq(self, cnpjs: list[str]) -> dict[str, DadosCnpjBigQuery]:
+        from google.cloud import bigquery
+
+        cfg = self._obter_config()
+        cliente = self._cliente_bq(cfg)
+
+        sql = f"""
+            SELECT cnpj, razao_social, nome_fantasia, situacao_cadastral,
+                   uf, municipio, cnae_principal
+            FROM `{self._tabela(cfg)}`
+            WHERE cnpj IN UNNEST(@cnpjs)
+        """
+        params = [bigquery.ArrayQueryParameter("cnpjs", "STRING", cnpjs)]
+
+        limite = self._limite_gb(cfg)
+        self.ultimo_gb = self._estimar_gb(cliente, sql, params)
+        if self.ultimo_gb > limite:
+            raise LimiteExcedido(self.ultimo_gb, limite)
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=params,
+            maximum_bytes_billed=max(1, limite) * 1024**3,
+            use_query_cache=True,
+        )
+        resultado: dict[str, DadosCnpjBigQuery] = {}
+        for r in cliente.query(sql, job_config=job_config).result():
+            cnpj = normalizar_cnpj(r.cnpj)
+            if not cnpj or cnpj in resultado:
+                continue
+            resultado[cnpj] = DadosCnpjBigQuery(
+                cnpj=cnpj,
+                razao_social=(r.razao_social or "").strip(),
+                nome_fantasia=(r.nome_fantasia or "").strip(),
+                situacao=(r.situacao_cadastral or "").strip().upper(),
+                municipio=(r.municipio or "").strip(),
+                uf=(r.uf or "").strip().upper(),
+                cnae_principal=(r.cnae_principal or "").strip(),
+            )
+        return resultado
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/cnpj/composite_cnpj_lookup.py
+================================================================================
+"""Lookup de CNPJ composto: tenta o OpenCNPJ primeiro e usa o BigQuery como reserva.
+O cliente BigQuery pode ser trocado em tempo de execução (via configurações)."""
+from __future__ import annotations
+
+import logging
+import threading
+
+from boleto_extractor.application.ports.cnpj_lookup import CnpjLookup
+from boleto_extractor.domain.entities.beneficiario import DadosEmpresa
+
+log = logging.getLogger(__name__)
+
+
+class CompositeCnpjLookup:
+    """Implementa o Protocol CnpjLookup. Nunca lança exceção: retorna None em falha."""
+
+    def __init__(self, primario: CnpjLookup, bigquery: CnpjLookup | None = None) -> None:
+        self._primario = primario
+        self._bigquery = bigquery
+        self._lock = threading.Lock()  # set_bigquery roda na thread da UI; consultar, em workers
+        self._cache: dict[str, DadosEmpresa] = {}
+
+    def set_bigquery(self, cliente: CnpjLookup | None) -> None:
+        with self._lock:
+            self._bigquery = cliente
+        log.info("BigQuery %s.", "ativado" if cliente else "desativado")
+
+    def consultar(self, cnpj: str) -> DadosEmpresa | None:
+        cnpj = "".join(c for c in cnpj if c.isdigit())
+        if not cnpj:
+            return None
+
+        with self._lock:
+            if cnpj in self._cache:
+                return self._cache[cnpj]
+            bigquery = self._bigquery
+
+        for nome, fonte in (("OpenCNPJ", self._primario), ("BigQuery", bigquery)):
+            if fonte is None:
+                continue
+            if nome == "BigQuery" and not getattr(fonte, "disponivel", True):
+                continue
+            try:
+                dados = fonte.consultar(cnpj)
+            except Exception as exc:  # noqa: BLE001 - contrato: nunca lançar
+                log.warning("%s falhou para %s: %s", nome, cnpj, exc)
+                dados = None
+            if dados is not None:
+                with self._lock:
+                    self._cache[cnpj] = dados
+                return dados
+
+        return None
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/cnpj/fallback_cnpj_lookup.py
+================================================================================
+from __future__ import annotations
+
+import logging
+from typing import Any, Protocol
+
+log = logging.getLogger(__name__)
+
+
+class CnpjLookup(Protocol):
+    def consultar(self, cnpj: str) -> Any | None: ...
+
+
+class FallbackCnpjLookup:
+    """Tenta cada fonte em ordem; a primeira que responder vence."""
+
+    def __init__(self, *fontes: CnpjLookup) -> None:
+        self._fontes = fontes
+
+    def consultar(self, cnpj: str) -> Any | None:
+        for fonte in self._fontes:
+            if hasattr(fonte, "ativo") and not fonte.ativo():
+                continue
+            try:
+                resultado = fonte.consultar(cnpj)
+                if resultado:
+                    return resultado
+            except Exception as exc:  # uma fonte falhar não derruba a extração
+                log.warning("Fonte %s falhou para %s: %s", type(fonte).__name__, cnpj, exc)
+        return None
+
+    def __getattr__(self, nome: str):
+        # Repassa outros métodos (ex.: fechar sessão) para a fonte principal
+        return getattr(self._fontes[0], nome)
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/cnpj/opencnpj_client.py
+================================================================================
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+from typing import Any
+
+from boleto_extractor.application.services.documento_validator import cnpj_valido, limpar
+from boleto_extractor.core.config import settings
+from boleto_extractor.domain.entities.beneficiario import DadosEmpresa
+from boleto_extractor.infrastructure.cnpj.sqlite_cnpj_cache import (
+    STATUS_NAO_ENCONTRADO,
+    STATUS_OK,
+    SqliteCnpjCache,
+)
+
+
+class OpenCnpjClient:
+    """Consulta a OpenCNPJ com cache em memória + SQLite e controle de limite (429)."""
+
+    def __init__(self, cache: SqliteCnpjCache | None = None) -> None:
+        self._cache = cache or SqliteCnpjCache()
+        self._memoria: dict[str, DadosEmpresa | None] = {}
+        self._lock = threading.Lock()
+        self._ultima = 0.0
+        self._bloqueado_ate = 0.0
+
+    def consultar(self, cnpj: str) -> DadosEmpresa | None:
+        try:
+            c = limpar(cnpj)
+            if not cnpj_valido(c):
+                return None
+
+            with self._lock:  # serializa: o mesmo CNPJ nunca é consultado em paralelo
+                if c in self._memoria:
+                    return self._memoria[c]
+
+                em_cache = self._cache.obter(c)
+                if em_cache is not None:
+                    self._memoria[c] = em_cache[1]
+                    return em_cache[1]
+
+                resposta = self._requisitar(c)
+                if resposta is None:
+                    return None  # falha transitória: não cacheia, tenta depois
+
+                status, dados = resposta
+                self._cache.salvar(c, status, dados)
+                self._memoria[c] = dados
+                return dados
+        except Exception:
+            return None
+
+    def _requisitar(self, cnpj: str) -> tuple[str, DadosEmpresa | None] | None:
+        if time.time() < self._bloqueado_ate:
+            return None
+
+        espera = settings.opencnpj_intervalo_min - (time.time() - self._ultima)
+        if espera > 0:
+            time.sleep(espera)
+
+        req = urllib.request.Request(
+            settings.opencnpj_url.format(cnpj),
+            headers={"Accept": "application/json", "User-Agent": "ExtratorBoletos/1.0"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=settings.opencnpj_timeout) as r:
+                return STATUS_OK, self._converter(json.loads(r.read().decode("utf-8")))
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return STATUS_NAO_ENCONTRADO, None
+            if e.code == 429:
+                self._bloqueado_ate = time.time() + settings.opencnpj_pausa_429
+            return None
+        except Exception:
+            return None
+        finally:
+            self._ultima = time.time()
+
+    @staticmethod
+    def _converter(j: dict[str, Any]) -> DadosEmpresa:
+        def s(chave: str) -> str:
+            return str(j.get(chave) or "")
+
+        telefone = ""
+        for t in j.get("telefones") or []:
+            if isinstance(t, dict) and t.get("numero") and not t.get("is_fax"):
+                ddd = str(t.get("ddd") or "")
+                telefone = f"({ddd}) {t['numero']}" if ddd else str(t["numero"])
+                break
+
+        return DadosEmpresa(
+            razao_social=s("razao_social"),
+            nome_fantasia=s("nome_fantasia"),
+            situacao_cadastral=s("situacao_cadastral"),
+            municipio=s("municipio"),
+            uf=s("uf"),
+            email=s("email").lower(),
+            telefone=telefone,
+            cnae_principal=s("cnae_principal"),
+            porte_empresa=s("porte_empresa"),
+            opcao_simples=s("opcao_simples"),
+            opcao_mei=s("opcao_mei"),
+        )
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/cnpj/sqlite_cnpj_cache.py
+================================================================================
+import json
+import sqlite3
+import threading
+import time
+from dataclasses import asdict, fields
+from pathlib import Path
+
+from boleto_extractor.core.config import settings
+from boleto_extractor.domain.entities.beneficiario import DadosEmpresa
+
+STATUS_OK = "ok"
+STATUS_NAO_ENCONTRADO = "nao_encontrado"
+_CAMPOS = {f.name for f in fields(DadosEmpresa)}
+
+
+class SqliteCnpjCache:
+    """Cache persistente de consultas. Se o SQLite falhar, opera como sem cache."""
+
+    def __init__(self, caminho: Path | None = None) -> None:
+        self._lock = threading.Lock()
+        self._con: sqlite3.Connection | None = None
+        try:
+            arq = caminho or settings.data_dir / "cache_cnpj.sqlite"
+            arq.parent.mkdir(parents=True, exist_ok=True)
+            self._con = sqlite3.connect(arq, check_same_thread=False)
+            self._con.execute(
+                "CREATE TABLE IF NOT EXISTS cnpj ("
+                " cnpj TEXT PRIMARY KEY, status TEXT NOT NULL,"
+                " dados TEXT, consultado_em REAL NOT NULL)"
+            )
+            self._con.commit()
+        except Exception:
+            self._con = None
+
+    def obter(self, cnpj: str) -> tuple[str, DadosEmpresa | None] | None:
+        """None = não está em cache (ou expirou)."""
+        if self._con is None:
+            return None
+        try:
+            with self._lock:
+                row = self._con.execute(
+                    "SELECT status, dados, consultado_em FROM cnpj WHERE cnpj = ?", (cnpj,)
+                ).fetchone()
+            if not row:
+                return None
+            status, dados, quando = str(row[0]), row[1], float(row[2])
+            ttl = settings.cache_ttl_ok if status == STATUS_OK else settings.cache_ttl_nao_encontrado
+            if time.time() - quando > ttl:
+                return None
+            if status != STATUS_OK:
+                return status, None
+            bruto = json.loads(dados or "{}")
+            return status, DadosEmpresa(**{k: str(v) for k, v in bruto.items() if k in _CAMPOS})
+        except Exception:
+            return None
+
+    def salvar(self, cnpj: str, status: str, dados: DadosEmpresa | None) -> None:
+        if self._con is None:
+            return
+        try:
+            payload = json.dumps(asdict(dados) if dados else {}, ensure_ascii=False)
+            with self._lock:
+                self._con.execute(
+                    "INSERT OR REPLACE INTO cnpj VALUES (?, ?, ?, ?)",
+                    (cnpj, status, payload, time.time()),
+                )
+                self._con.commit()
+        except Exception:
+            pass
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/erp/erp_parcela_repository.py
+================================================================================
+from __future__ import annotations
+
+from collections import defaultdict
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+_DOIS = Decimal("0.01")
+
+_SALDO = (
+    "(p.pagparc_vlrdocumento + COALESCE(p.pagparc_vlracrescimo,0)"
+    " - COALESCE(p.pagparc_vlrdesconto,0) - COALESCE(p.pagparc_vlrbaixas,0)"
+    " - COALESCE(p.pagparc_vlrpago,0))"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ParcelaErp:
+    cod: int
+    conta: int
+    parcela: int
+    qtd_parcelas: int
+    vencimento: date | None
+    valor_documento: Decimal
+    saldo: Decimal
+    pago: bool
+    nome: str
+    nota: str
+
+    @property
+    def rotulo(self) -> str:
+        return f"Parc. {self.parcela}/{self.qtd_parcelas or '?'} (#{self.cod})"
+
+
+class ErpParcelaRepository:
+    """Somente leitura no ERP."""
+
+    def __init__(self, config: Callable[[], dict[str, Any]], senha: Callable[[], str]) -> None:
+        self._config = config
+        self._senha = senha
+
+    def _conectar(self):
+        import pymysql
+
+        cfg = self._config()
+        return pymysql.connect(
+            host=cfg["db_host"], port=int(cfg["db_porta"]), user=cfg["db_usuario"],
+            password=self._senha(), database=cfg["db_banco"] or None,
+            charset="latin1", ssl={"ssl": {}} if cfg.get("db_ssl") else None,
+            connect_timeout=5, read_timeout=30,
+        )
+
+    def parcelas_das_contas(self, contas: Iterable[int]) -> dict[int, list[ParcelaErp]]:
+        contas = sorted({int(c) for c in contas})
+        resultado: dict[int, list[ParcelaErp]] = defaultdict(list)
+        if not contas:
+            return {}
+
+        marcas = ",".join(["%s"] * len(contas))
+        sql = f"""
+            SELECT p.pagparc_cod, p.pagparc_conta, p.pagparc_parcela, pg.pag_qtdparcelas,
+                   p.pagparc_dtvencimento, p.pagparc_vlrdocumento, {_SALDO},
+                   p.pagparc_dtpagamento, COALESCE(p.pagparc_nome, ''),
+                   COALESCE(NULLIF(p.pagparc_nota, ''), pg.pag_numnf, '')
+              FROM pagar_parcelas p
+              JOIN pagar pg ON pg.pag_cod = p.pagparc_conta
+             WHERE p.pagparc_conta IN ({marcas})
+          ORDER BY p.pagparc_conta, p.pagparc_dtvencimento, p.pagparc_parcela
+        """
+        with self._conectar() as con, con.cursor() as cur:
+            cur.execute(sql, contas)
+            for r in cur.fetchall():
+                saldo = Decimal(str(r[6] or 0)).quantize(_DOIS)
+                resultado[r[1]].append(ParcelaErp(
+                    cod=r[0], conta=r[1], parcela=r[2] or 0, qtd_parcelas=r[3] or 0,
+                    vencimento=r[4] if isinstance(r[4], date) else None,
+                    valor_documento=Decimal(str(r[5] or 0)).quantize(_DOIS),
+                    saldo=saldo,
+                    pago=r[7] is not None or saldo <= Decimal("0.009"),
+                    nome=(r[8] or "").strip(), nota=(r[9] or "").strip(),
+                ))
+        return dict(resultado)
+
+
+================================================================================
 ARQUIVO: src/boleto_extractor/infrastructure/image/__init__.py
 ================================================================================
 
@@ -1395,7 +2488,6 @@ ARQUIVO: src/boleto_extractor/infrastructure/pdf/__init__.py
 ================================================================================
 ARQUIVO: src/boleto_extractor/infrastructure/pdf/local_document_loader.py
 ================================================================================
-
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -1406,6 +2498,7 @@ import pymupdf
 from boleto_extractor.core.config import settings
 from boleto_extractor.core.exceptions import DocumentLoadError
 from boleto_extractor.core.types import ImageArray
+from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
 
 
 class LocalDocumentLoader:
@@ -1428,32 +2521,19 @@ class LocalDocumentLoader:
 
     def _validar_arquivo(self, arquivo: Path) -> None:
         if not arquivo.exists():
-            raise DocumentLoadError(
-                f"Arquivo não encontrado: {arquivo}"
-            )
+            raise DocumentLoadError(f"Arquivo não encontrado: {arquivo}")
 
         if not arquivo.is_file():
-            raise DocumentLoadError(
-                f"O caminho informado não é um arquivo: {arquivo}"
-            )
+            raise DocumentLoadError(f"O caminho informado não é um arquivo: {arquivo}")
 
         if arquivo.suffix.lower() not in settings.supported_extensions:
-            raise DocumentLoadError(
-                f"Formato não suportado: {arquivo.suffix}"
-            )
+            raise DocumentLoadError(f"Formato não suportado: {arquivo.suffix}")
 
-    def _carregar_pdf(
-        self,
-        arquivo: Path,
-    ) -> Iterator[ImageArray]:
-
+    def _carregar_pdf(self, arquivo: Path) -> Iterator[ImageArray]:
         try:
-            with pymupdf.open(arquivo) as documento:  # type: ignore[no-untyped-call]
-
+            with senhas_pdf.abrir(arquivo) as documento:
                 if documento.page_count == 0:
-                    raise DocumentLoadError(
-                        "O documento PDF não possui páginas."
-                    )
+                    raise DocumentLoadError("O documento PDF não possui páginas.")
 
                 for pagina in documento:
                     pixmap = pagina.get_pixmap(
@@ -1461,22 +2541,12 @@ class LocalDocumentLoader:
                         colorspace=pymupdf.csRGB,
                         alpha=False,
                     )
-
-                    imagem = np.frombuffer(
-                        pixmap.samples,
-                        dtype=np.uint8,
-                    )
-
-                    imagem = imagem.reshape(
-                        pixmap.height,
-                        pixmap.width,
-                        3,
-                    )
-
+                    imagem = np.frombuffer(pixmap.samples, dtype=np.uint8)
+                    imagem = imagem.reshape(pixmap.height, pixmap.width, 3)
                     yield np.ascontiguousarray(imagem)
 
         except DocumentLoadError:
-            raise
+            raise  # inclui PdfProtegidoError
 
         except Exception as exc:
             raise DocumentLoadError(
@@ -1486,31 +2556,167 @@ class LocalDocumentLoader:
     def _carregar_imagem(self, arquivo: Path) -> ImageArray:
         try:
             dados = np.fromfile(arquivo, dtype=np.uint8)
-
-            imagem = cv2.imdecode(
-                dados,
-                cv2.IMREAD_COLOR,
-            )
+            imagem = cv2.imdecode(dados, cv2.IMREAD_COLOR)
 
             if imagem is None:
-                raise DocumentLoadError(
-                    f"Não foi possível decodificar: {arquivo.name}"
-                )
+                raise DocumentLoadError(f"Não foi possível decodificar: {arquivo.name}")
 
-            imagem_rgb = cv2.cvtColor(
-                imagem,
-                cv2.COLOR_BGR2RGB,
-            )
-
+            imagem_rgb = cv2.cvtColor(imagem, cv2.COLOR_BGR2RGB)
             return np.ascontiguousarray(imagem_rgb)
 
         except DocumentLoadError:
             raise
 
         except Exception as exc:
-            raise DocumentLoadError(
-                f"Falha ao carregar a imagem: {arquivo.name}"
-            ) from exc
+            raise DocumentLoadError(f"Falha ao carregar a imagem: {arquivo.name}") from exc
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/pdf/pdf_senha.py
+================================================================================
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+
+import pymupdf
+
+from boleto_extractor.core.exceptions import DocumentLoadError
+
+_SERVICO = "BoletoExtractor-PDF"
+_CHAVE = "senhas"
+_MAX_LEMBRADAS = 30
+
+
+class PdfProtegidoError(DocumentLoadError):
+    """Nenhuma senha informada pelo usuário abre o PDF."""
+
+    def __init__(self, arquivo: Path) -> None:
+        super().__init__(f"PDF protegido por senha: {arquivo.name}")
+        self.arquivo = arquivo
+
+
+class SenhasPdf:
+    """
+    Guarda apenas senhas digitadas pelo usuário:
+    - por arquivo (memória, só nesta sessão);
+    - "usar nos próximos" (memória, só nesta sessão);
+    - "lembrar" (cofre do Windows, somente se o usuário marcar).
+    Nunca grava senha em log, CSV ou configuração exportada.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._por_arquivo: dict[str, str] = {}
+        self._sessao: list[str] = []
+        self._lembradas: list[str] = self._ler_cofre()
+
+    @staticmethod
+    def _chave(arquivo: Path | str) -> str:
+        return str(Path(arquivo).resolve()).lower()
+
+    # ---------------- Cofre do Windows ----------------
+    @staticmethod
+    def _ler_cofre() -> list[str]:
+        try:
+            import keyring
+            return list(json.loads(keyring.get_password(_SERVICO, _CHAVE) or "[]"))
+        except Exception:
+            return []
+
+    def _gravar_cofre(self) -> None:
+        try:
+            import keyring
+            keyring.set_password(_SERVICO, _CHAVE, json.dumps(self._lembradas[:_MAX_LEMBRADAS]))
+        except Exception:
+            pass
+
+    def esquecer_lembradas(self) -> None:
+        with self._lock:
+            self._lembradas = []
+            self._sessao = []
+            self._gravar_cofre()
+
+    # ---------------- Abertura ----------------
+    def _candidatas(self, arquivo: Path | str) -> list[str]:
+        with self._lock:
+            todas = [self._por_arquivo.get(self._chave(arquivo)), *self._sessao, *self._lembradas]
+        return [s for s in dict.fromkeys(todas) if s]
+
+    def abrir(self, arquivo: Path | str) -> pymupdf.Document:
+        """Abre o PDF; se protegido, usa só senhas informadas. Lança PdfProtegidoError."""
+        doc = pymupdf.open(arquivo)  # type: ignore[no-untyped-call]
+        if not doc.needs_pass:
+            return doc
+        for senha in self._candidatas(arquivo):
+            if doc.authenticate(senha):
+                with self._lock:
+                    self._por_arquivo[self._chave(arquivo)] = senha
+                return doc
+        doc.close()
+        raise PdfProtegidoError(Path(arquivo))
+
+    def precisa_senha(self, arquivo: Path | str) -> bool:
+        if Path(arquivo).suffix.lower() != ".pdf":
+            return False
+        try:
+            self.abrir(arquivo).close()
+            return False
+        except PdfProtegidoError:
+            return True
+        except Exception:
+            return False  # outros erros são reportados pelo loader
+
+    def informar(
+        self,
+        arquivo: Path | str,
+        senha: str,
+        usar_nos_proximos: bool = False,
+        lembrar: bool = False,
+    ) -> bool:
+        """Testa a senha digitada. Só guarda se ela abrir o arquivo."""
+        if not senha:
+            return False
+        try:
+            with pymupdf.open(arquivo) as doc:  # type: ignore[no-untyped-call]
+                if doc.needs_pass and not doc.authenticate(senha):
+                    return False
+        except Exception:
+            return False
+
+        with self._lock:
+            self._por_arquivo[self._chave(arquivo)] = senha
+            if usar_nos_proximos and senha not in self._sessao:
+                self._sessao.insert(0, senha)
+            if lembrar:
+                self._lembradas = [senha, *(s for s in self._lembradas if s != senha)]
+                self._gravar_cofre()
+        return True
+
+
+senhas_pdf = SenhasPdf()
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/pdf/pymupdf_text_extractor.py
+================================================================================
+from pathlib import Path
+
+from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
+
+
+class PyMuPdfTextExtractor:
+    """Extrai a camada de texto de PDFs digitais. Imagens/PDF escaneado retornam vazio."""
+
+    def extrair_paginas(self, arquivo: Path) -> tuple[str, ...]:
+        if arquivo.suffix.lower() != ".pdf":
+            return ()
+        try:
+            with senhas_pdf.abrir(arquivo) as doc:
+                return tuple(str(p.get_text()) for p in doc)
+        except Exception:
+            return ()
 
 
 ================================================================================
@@ -1530,30 +2736,49 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
 from boleto_extractor.application.use_cases.extract_boleto import ExtractBoletoUseCase
-from boleto_extractor.core.config import settings
+from boleto_extractor.core.config import settings as app_config
 from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import ZXingBarcodeReader
+from boleto_extractor.infrastructure.cnpj.bigquery_cnpj_client import BigQueryCnpjClient
+from boleto_extractor.infrastructure.cnpj.fallback_cnpj_lookup import FallbackCnpjLookup
+from boleto_extractor.infrastructure.cnpj.opencnpj_client import OpenCnpjClient
 from boleto_extractor.infrastructure.pdf.local_document_loader import LocalDocumentLoader
+from boleto_extractor.infrastructure.pdf.pymupdf_text_extractor import PyMuPdfTextExtractor
 from boleto_extractor.presentation.themes.theme_manager import ThemeManager
 from boleto_extractor.presentation.viewmodels.main_viewmodel import MainViewModel
+from boleto_extractor.presentation.viewmodels.settings_viewmodel import SettingsViewModel
 
 
 class DesktopApplication:
     def __init__(self) -> None:
         QCoreApplication.setOrganizationName("BoletoExtractor")
-        QCoreApplication.setApplicationName(settings.app_name)
+        QCoreApplication.setApplicationName(app_config.app_name)
         QQuickStyle.setStyle("Basic")  # permite personalização total dos controles
 
         self._application = QGuiApplication(sys.argv)
         self._engine = QQmlApplicationEngine()
 
-        use_case = ExtractBoletoUseCase(LocalDocumentLoader(), ZXingBarcodeReader())
+        # Settings primeiro: os serviços leem a configuração a cada consulta
+        self._settings = SettingsViewModel(self._application)
+
+        cnpj_lookup = FallbackCnpjLookup(
+            OpenCnpjClient(),
+            BigQueryCnpjClient(self._settings.valores),
+        )
+
+        use_case = ExtractBoletoUseCase(
+            LocalDocumentLoader(),
+            ZXingBarcodeReader(),
+            text_extractor=PyMuPdfTextExtractor(),
+            cnpj_lookup=cnpj_lookup,
+        )
         self._theme = ThemeManager(self._application)
         self._viewmodel = MainViewModel(use_case)
 
         contexto = self._engine.rootContext()
         contexto.setContextProperty("Theme", self._theme)
         contexto.setContextProperty("viewModel", self._viewmodel)
-        contexto.setContextProperty("appVersion", settings.version)
+        contexto.setContextProperty("settings", self._settings)
+        contexto.setContextProperty("appVersion", app_config.version)
 
     def executar(self) -> int:
         qml_path = Path(__file__).parent / "qml" / "Main.qml"
@@ -1563,6 +2788,119 @@ class DesktopApplication:
             return 1
 
         return self._application.exec()
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/presentation/boleto_list_model.py
+================================================================================
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+
+from PySide6.QtCore import QAbstractListModel, QByteArray, QModelIndex, Qt
+
+from boleto_extractor.application.services.matching_service import ROTULOS, ResultadoCruzamento
+
+
+@dataclass(slots=True)
+class LinhaBoleto:
+    arquivo: str
+    codigo_barras: str
+    linha_digitavel: str
+    valor: Decimal | None
+    vencimento: date | None = None
+    origem_vencimento: str = ""     # 'codigo' | 'pdf' | 'manual' | ''
+    documento: int | None = None
+    resultado: ResultadoCruzamento | None = None
+    erro_documento: bool = False
+    erro_data: bool = False
+
+    @property
+    def tipo(self) -> str:
+        return "Arrecadação" if self.codigo_barras.startswith("8") else "Cobrança"
+
+
+def _moeda(v: Decimal | None) -> str:
+    if v is None:
+        return "--"
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+class BoletoListModel(QAbstractListModel):
+    _NOMES = [
+        "arquivo", "tipo", "linhaDigitavel", "valor", "vencimento", "origemVencimento",
+        "documento", "status", "statusTexto", "parcela", "detalhe", "erroDocumento", "erroData",
+    ]
+    ROLES = {Qt.UserRole + i + 1: n for i, n in enumerate(_NOMES)}
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._itens: list[LinhaBoleto] = []
+
+    # ---------- Qt ----------
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._itens)
+
+    def roleNames(self) -> dict[int, QByteArray]:
+        return {r: QByteArray(n.encode()) for r, n in self.ROLES.items()}
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        it = self._itens[index.row()]
+        nome = self.ROLES.get(role)
+        res = it.resultado
+        match nome:
+            case "arquivo": return it.arquivo
+            case "tipo": return it.tipo
+            case "linhaDigitavel": return it.linha_digitavel
+            case "valor": return _moeda(it.valor)
+            case "vencimento": return it.vencimento.strftime("%d/%m/%Y") if it.vencimento else ""
+            case "origemVencimento": return it.origem_vencimento
+            case "documento": return str(it.documento) if it.documento else ""
+            case "status": return res.status.value if res else ""
+            case "statusTexto": return ROTULOS[res.status] if res else "Pendente"
+            case "parcela": return res.parcela.rotulo if res and res.parcela else ""
+            case "detalhe": return res.detalhe if res else ""
+            case "erroDocumento": return it.erro_documento
+            case "erroData": return it.erro_data
+        return None
+
+    # ---------- API ----------
+    @property
+    def itens(self) -> list[LinhaBoleto]:
+        return self._itens
+
+    def adicionar(self, linhas: list[LinhaBoleto]) -> None:
+        existentes = {i.codigo_barras for i in self._itens}
+        novas = [l for l in linhas if l.codigo_barras not in existentes]
+        if not novas:
+            return
+        ini = len(self._itens)
+        self.beginInsertRows(QModelIndex(), ini, ini + len(novas) - 1)
+        self._itens.extend(novas)
+        self.endInsertRows()
+
+    def remover(self, row: int) -> None:
+        if 0 <= row < len(self._itens):
+            self.beginRemoveRows(QModelIndex(), row, row)
+            del self._itens[row]
+            self.endRemoveRows()
+
+    def limpar(self) -> None:
+        self.beginResetModel()
+        self._itens.clear()
+        self.endResetModel()
+
+    def atualizar(self, row: int) -> None:
+        idx = self.index(row)
+        self.dataChanged.emit(idx, idx)
+
+    def atualizar_todos(self) -> None:
+        if self._itens:
+            self.dataChanged.emit(self.index(0), self.index(len(self._itens) - 1))
 
 
 ================================================================================
@@ -1605,6 +2943,966 @@ def formatar_data(data: date | None, estimada: bool = False) -> str:
 ================================================================================
 ARQUIVO: src/boleto_extractor/presentation/qml/__init__.py
 ================================================================================
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/presentation/qml/Main.txt
+================================================================================
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Dialogs
+
+ApplicationWindow {
+    id: root
+    width: 1440
+    height: 720
+    minimumWidth: 1100
+    minimumHeight: 500
+    visible: true
+    title: "Extrator de Boletos"
+    color: Theme.t.background
+
+    readonly property var statusTexto: ({
+        pending: "Na fila", success: "Sucesso", invalid: "Inválido",
+        review: "Revisar", error: "Erro"
+    })
+
+    readonly property var colunas: [
+        { t: "STATUS", w: 92 }, { t: "ARQUIVO", w: 160 }, { t: "BENEFICIÁRIO", w: 230 },
+        { t: "EMISSOR", w: 130 }, { t: "VENCIMENTO", w: 100 }, { t: "VALOR", w: 110 },
+        { t: "LINHA DIGITÁVEL", w: -1 }, { t: "", w: 90 }
+    ]
+
+    // Mensagens dos testes de conexão
+    property string msgBq: ""
+    property bool okBq: true
+    property bool bqTestando: false
+    property string msgDb: ""
+    property bool okDb: true
+
+    function mostrarToast(mensagem) {
+        toast.texto = mensagem
+        toast.opacity = 1
+        toastTimer.restart()
+    }
+
+    // Aceita CNPJ numérico ou alfanumérico (12 alfanuméricos + 2 dígitos verificadores)
+    function testarConsultaCnpj() {
+        const cnpj = cnpjTeste.text.toUpperCase().replace(/[^A-Z0-9]/g, "")
+        if (!/^[A-Z0-9]{12}\d{2}$/.test(cnpj)) {
+            root.okBq = false
+            root.msgBq = "Informe um CNPJ válido (14 caracteres, numérico ou alfanumérico)."
+            return
+        }
+        root.bqTestando = true
+        root.okBq = true
+        root.msgBq = "Consultando…"
+        settings.testarConsultaCnpj(cnpj)
+    }
+
+    Component.onCompleted: codigoInput.forceActiveFocus()
+
+    Shortcut {
+        sequence: "Ctrl+L"
+        onActivated: { codigoInput.forceActiveFocus(); codigoInput.selectAll() }
+    }
+
+    // ---------- Componentes temáticos ----------
+    component ThemedText: Text {
+        property var estilo: Theme.t.body
+        color: estilo.color
+        font.family: estilo.font.family
+        font.pixelSize: estilo.font.pixelSize
+        font.weight: estilo.font.weight
+        elide: Text.ElideRight
+    }
+
+    component ThemedButton: Button {
+        id: btn
+        property bool secundario: false
+        readonly property var s: secundario ? Theme.t.buttonSecondary : Theme.t.button
+        hoverEnabled: true
+        focusPolicy: Qt.NoFocus  // não rouba o foco da caixa do leitor
+        font.family: s.font.family
+        font.pixelSize: s.font.pixelSize
+        font.weight: s.font.weight
+        contentItem: Text {
+            text: btn.text
+            font: btn.font
+            color: btn.s.text
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            implicitWidth: 120
+            implicitHeight: 38
+            radius: btn.s.radius
+            color: btn.down ? btn.s.backgroundPressed
+                 : btn.hovered ? btn.s.backgroundHover : btn.s.background
+            Behavior on color { ColorAnimation { duration: 120 } }
+        }
+        opacity: enabled ? 1 : 0.45
+    }
+
+    component ThemedInput: TextField {
+        id: campo
+        color: Theme.t.input.text
+        placeholderTextColor: Theme.t.input.placeholder
+        font.family: Theme.t.input.font.family
+        font.pixelSize: Theme.t.input.font.pixelSize
+        font.weight: Theme.t.input.font.weight
+        leftPadding: 12
+        selectByMouse: true
+        background: Rectangle {
+            implicitHeight: 38
+            radius: Theme.t.input.radius
+            color: Theme.t.input.background
+            border.width: campo.activeFocus ? 2 : 1
+            border.color: campo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
+        }
+    }
+
+    component ThemedCheck: CheckBox {
+        id: chk
+        contentItem: Text {
+            text: chk.text
+            leftPadding: chk.indicator.width + chk.spacing
+            verticalAlignment: Text.AlignVCenter
+            color: Theme.t.body.color
+            font.family: Theme.t.body.font.family
+            font.pixelSize: Theme.t.body.font.pixelSize
+        }
+    }
+
+    component ThemedTab: TabButton {
+        id: aba
+        focusPolicy: Qt.NoFocus
+        contentItem: Text {
+            text: aba.text
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            color: aba.checked ? Theme.t.accent : Theme.t.subtitle.color
+            font.family: Theme.t.body.font.family
+            font.pixelSize: Theme.t.body.font.pixelSize
+            font.weight: aba.checked ? 700 : 400
+        }
+        background: Rectangle {
+            implicitHeight: 38
+            color: "transparent"
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 2
+                color: aba.checked ? Theme.t.accent : Theme.t.border
+            }
+        }
+    }
+
+    component StatusPill: Rectangle {
+        property string status: "pending"
+        implicitWidth: 92
+        implicitHeight: 24
+        radius: 12
+        color: Qt.alpha(Theme.t.status[status], 0.18)
+        border.color: Theme.t.status[status]
+        Text {
+            anchors.centerIn: parent
+            text: root.statusTexto[parent.status]
+            color: Theme.t.status[parent.status]
+            font.family: Theme.t.table.headerFont.family
+            font.pixelSize: 12
+            font.weight: 700
+        }
+    }
+
+    // ---------- Diálogos ----------
+    FileDialog {
+        id: abrirDialog
+        title: "Selecionar boletos"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["Boletos (*.pdf *.png *.jpg *.jpeg)"]
+        onAccepted: viewModel.adicionarArquivos(selectedFiles)
+    }
+
+    FileDialog {
+        id: exportarDialog
+        title: "Exportar resultados"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "csv"
+        nameFilters: ["CSV (*.csv)"]
+        onAccepted: viewModel.exportarCsv(selectedFile)
+    }
+
+    FileDialog {
+        id: credencialDialog
+        title: "Selecionar chave da conta de serviço (JSON)"
+        nameFilters: ["Chave JSON (*.json)"]
+        onAccepted: settings.importarCredencial(selectedFile)
+    }
+
+    FileDialog {
+        id: exportarConfigDialog
+        title: "Exportar configuração"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "json"
+        nameFilters: ["JSON (*.json)"]
+        onAccepted: settings.exportar(selectedFile)
+    }
+
+    FileDialog {
+        id: importarConfigDialog
+        title: "Importar configuração"
+        nameFilters: ["JSON (*.json)"]
+        onAccepted: settings.importar(selectedFile)
+    }
+
+    Connections {
+        target: settings
+        function onTesteConcluido(tipo, ok, mensagem) {
+            if (tipo === "bq") {
+                root.msgBq = mensagem
+                root.okBq = ok
+                // A mensagem inicial "Consultando…" não encerra o teste
+                if (!mensagem.startsWith("Consultando"))
+                    root.bqTestando = false
+            } else {
+                root.msgDb = mensagem
+                root.okDb = ok
+            }
+        }
+    }
+
+    // ---------- Janela de senha do PDF ----------
+    Dialog {
+        id: senhaDialog
+        modal: true
+        anchors.centerIn: parent
+        width: 480
+        padding: 24
+        closePolicy: Popup.NoAutoClose
+        property string arquivoAtual: ""
+
+        function enviar() {
+            if (senhaInput.text.length === 0)
+                return
+            viewModel.informarSenha(senhaInput.text, usarProximos.checked, lembrarSenha.checked)
+            senhaInput.clear()
+            senhaInput.forceActiveFocus()
+        }
+
+        onOpened: senhaInput.forceActiveFocus()
+        onClosed: codigoInput.forceActiveFocus()
+
+        background: Rectangle {
+            color: Theme.t.surface
+            radius: 12
+            border.color: Theme.t.accent
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            ThemedText { text: "🔒 PDF protegido por senha"; estilo: Theme.t.title }
+            ThemedText { text: viewModel.senhaPosicao; estilo: Theme.t.subtitle }
+            ThemedText {
+                Layout.fillWidth: true
+                text: viewModel.senhaArquivo
+                estilo: Theme.t.mono
+            }
+
+            ThemedInput {
+                id: senhaInput
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+                placeholderText: "Digite a senha do arquivo e pressione Enter"
+                onAccepted: senhaDialog.enviar()
+            }
+
+            ThemedText {
+                Layout.fillWidth: true
+                visible: viewModel.senhaErro.length > 0
+                text: viewModel.senhaErro
+                color: Theme.t.status.invalid
+            }
+
+            ThemedCheck {
+                id: usarProximos
+                checked: true
+                text: "Usar esta senha nos próximos arquivos (só nesta sessão)"
+            }
+            ThemedCheck {
+                id: lembrarSenha
+                checked: false
+                text: "Lembrar senha (cofre do Windows)"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                ThemedButton {
+                    text: "Pular todos"
+                    secundario: true
+                    visible: viewModel.senhaRestantes > 1
+                    onClicked: viewModel.pularTodasSenhas()
+                }
+                Item { Layout.fillWidth: true }
+                ThemedButton {
+                    text: "Pular"
+                    secundario: true
+                    onClicked: { senhaInput.clear(); viewModel.pularSenha() }
+                }
+                ThemedButton {
+                    text: "Abrir"
+                    enabled: senhaInput.text.length > 0
+                    onClicked: senhaDialog.enviar()
+                }
+            }
+        }
+
+        Shortcut {
+            sequence: "Esc"
+            enabled: senhaDialog.opened
+            onActivated: { senhaInput.clear(); viewModel.pularSenha() }
+        }
+    }
+
+    Connections {
+        target: viewModel
+        function onSenhaChanged() {
+            if (viewModel.senhaPendente) {
+                if (senhaDialog.arquivoAtual !== viewModel.senhaArquivo) {
+                    senhaDialog.arquivoAtual = viewModel.senhaArquivo
+                    senhaInput.clear()
+                }
+                if (!senhaDialog.opened)
+                    senhaDialog.open()
+            } else {
+                senhaDialog.arquivoAtual = ""
+                senhaDialog.close()
+            }
+        }
+        function onNotificacao(mensagem) {
+            root.mostrarToast(mensagem)
+        }
+    }
+
+    Dialog {
+        id: configDialog
+        modal: true
+        anchors.centerIn: parent
+        width: 600
+        height: Math.min(root.height * 0.92, 660)
+        padding: 24
+        onClosed: codigoInput.forceActiveFocus()
+        background: Rectangle {
+            color: Theme.t.surface
+            radius: 12
+            border.color: Theme.t.border
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 16
+
+            ThemedText { text: "Configurações"; estilo: Theme.t.title }
+
+            TabBar {
+                id: abas
+                Layout.fillWidth: true
+                background: Item {}
+                ThemedTab { text: "Aparência" }
+                ThemedTab { text: "BigQuery (CNPJ)" }
+                ThemedTab { text: "MySQL (ERP)" }
+            }
+
+            StackLayout {
+                currentIndex: abas.currentIndex
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                // ================= Aparência =================
+                ColumnLayout {
+                    spacing: 16
+
+                    ThemedText { text: "Tema"; estilo: Theme.t.subtitle }
+
+                    ComboBox {
+                        id: temaCombo
+                        Layout.fillWidth: true
+                        model: Theme.opcoes
+                        textRole: "nome"
+                        valueRole: "id"
+                        Component.onCompleted: currentIndex = indexOfValue(Theme.selecionado)
+                        onActivated: Theme.selecionar(currentValue)
+
+                        contentItem: Text {
+                            leftPadding: 12
+                            text: temaCombo.displayText
+                            color: Theme.t.input.text
+                            font.family: Theme.t.input.font.family
+                            font.pixelSize: Theme.t.input.font.pixelSize
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            implicitHeight: 40
+                            radius: Theme.t.input.radius
+                            color: Theme.t.input.background
+                            border.color: temaCombo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
+                        }
+                        delegate: ItemDelegate {
+                            width: temaCombo.width
+                            highlighted: temaCombo.highlightedIndex === index
+                            contentItem: Text {
+                                text: modelData.nome
+                                color: Theme.t.body.color
+                                font.family: Theme.t.body.font.family
+                                font.pixelSize: Theme.t.body.font.pixelSize
+                            }
+                            background: Rectangle {
+                                color: highlighted ? Theme.t.table.rowHover : Theme.t.surface
+                            }
+                        }
+                        popup.background: Rectangle {
+                            color: Theme.t.surface
+                            border.color: Theme.t.border
+                            radius: 8
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: preview.implicitHeight + 32
+                        radius: 8
+                        color: Theme.t.background
+                        border.color: Theme.t.border
+
+                        ColumnLayout {
+                            id: preview
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            spacing: 10
+                            ThemedText { text: "Pré-visualização"; estilo: Theme.t.subtitle }
+                            ThemedInput { Layout.fillWidth: true; placeholderText: "Caixa de texto" }
+                            ThemedText { text: "23790.12345 60000.000001 23456.789012 1 99990000010000"; estilo: Theme.t.mono }
+                            RowLayout {
+                                ThemedButton { text: "Primário" }
+                                ThemedButton { text: "Secundário"; secundario: true }
+                                StatusPill { status: "success" }
+                                StatusPill { status: "review" }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+
+                // ================= BigQuery =================
+                ColumnLayout {
+                    spacing: 8
+
+                    ThemedCheck {
+                        text: "Usar BigQuery como fonte reserva de CNPJ"
+                        checked: settings.bqAtivo
+                        onToggled: settings.bqAtivo = checked
+                    }
+
+                    ThemedText { text: "Credencial (conta de serviço)"; estilo: Theme.t.subtitle }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        ThemedInput {
+                            Layout.fillWidth: true
+                            readOnly: true
+                            text: settings.bqCredencial
+                            placeholderText: "Nenhuma credencial importada"
+                        }
+                        ThemedButton {
+                            text: "Importar…"
+                            secundario: true
+                            onClicked: credencialDialog.open()
+                        }
+                        ThemedButton {
+                            text: "Remover"
+                            secundario: true
+                            enabled: settings.bqCredencial !== ""
+                            onClicked: settings.removerCredencial()
+                        }
+                    }
+
+                    ThemedText { text: "Projeto (faturamento)"; estilo: Theme.t.subtitle }
+                    ThemedInput {
+                        Layout.fillWidth: true
+                        text: settings.bqProjeto
+                        onTextChanged: settings.bqProjeto = text
+                    }
+
+                    ThemedText { text: "Tabela"; estilo: Theme.t.subtitle }
+                    ThemedInput {
+                        Layout.fillWidth: true
+                        text: settings.bqTabela
+                        placeholderText: "opencnpj-bigquery.public.receita"
+                        font.family: Theme.t.mono.font.family
+                        onTextChanged: settings.bqTabela = text
+                    }
+
+                    ThemedText { text: "Limite por consulta (GB)"; estilo: Theme.t.subtitle }
+                    ThemedInput {
+                        Layout.preferredWidth: 120
+                        text: settings.bqLimiteGb
+                        validator: IntValidator { bottom: 1; top: 100 }
+                        onTextChanged: if (acceptableInput) settings.bqLimiteGb = parseInt(text)
+                    }
+
+                    ThemedText { text: "Testes"; estilo: Theme.t.subtitle }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        ThemedButton {
+                            text: "Testar conexão"
+                            secundario: true
+                            enabled: !root.bqTestando
+                            onClicked: {
+                                root.bqTestando = true
+                                root.okBq = true
+                                root.msgBq = "Testando…"
+                                settings.testarBigQuery()
+                            }
+                        }
+
+                        ThemedInput {
+                            id: cnpjTeste
+                            Layout.fillWidth: true
+                            text: "00000000000191"   // Banco do Brasil
+                            placeholderText: "CNPJ (numérico ou alfanumérico)"
+                            font.family: Theme.t.mono.font.family
+                            font.capitalization: Font.AllUppercase
+                            maximumLength: 18
+                            validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z.\/-]{0,18}/ }
+                            onAccepted: if (!root.bqTestando && settings.bqCredencial !== "") root.testarConsultaCnpj()
+                        }
+
+                        ThemedButton {
+                            text: root.bqTestando ? "Aguarde…" : "Testar consulta"
+                            enabled: !root.bqTestando && settings.bqCredencial !== ""
+                            onClicked: root.testarConsultaCnpj()
+                        }
+                    }
+
+                    ThemedText {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        text: root.msgBq
+                        color: root.okBq ? Theme.t.status.success : Theme.t.status.error
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+
+                // ================= MySQL =================
+                ColumnLayout {
+                    spacing: 8
+
+                    ThemedCheck {
+                        text: "Integrar com o banco MySQL do ERP"
+                        checked: settings.dbAtivo
+                        onToggled: settings.dbAtivo = checked
+                    }
+
+                    GridLayout {
+                        columns: 2
+                        Layout.fillWidth: true
+                        columnSpacing: 12
+                        rowSpacing: 8
+
+                        ThemedText { text: "Host" }
+                        ThemedInput {
+                            Layout.fillWidth: true
+                            text: settings.dbHost
+                            onTextChanged: settings.dbHost = text
+                        }
+
+                        ThemedText { text: "Porta" }
+                        ThemedInput {
+                            Layout.preferredWidth: 120
+                            text: settings.dbPorta
+                            validator: IntValidator { bottom: 1; top: 65535 }
+                            onTextChanged: if (acceptableInput) settings.dbPorta = parseInt(text)
+                        }
+
+                        ThemedText { text: "Banco" }
+                        ThemedInput {
+                            Layout.fillWidth: true
+                            text: settings.dbBanco
+                            onTextChanged: settings.dbBanco = text
+                        }
+
+                        ThemedText { text: "Usuário" }
+                        ThemedInput {
+                            Layout.fillWidth: true
+                            text: settings.dbUsuario
+                            onTextChanged: settings.dbUsuario = text
+                        }
+
+                        ThemedText { text: "Senha" }
+                        ThemedInput {
+                            Layout.fillWidth: true
+                            echoMode: TextInput.Password
+                            placeholderText: settings.dbSenhaSalva ? "•••• (salva no cofre do Windows)" : ""
+                            onTextChanged: settings.dbSenha = text
+                        }
+                    }
+
+                    ThemedCheck {
+                        text: "Usar SSL"
+                        checked: settings.dbSsl
+                        onToggled: settings.dbSsl = checked
+                    }
+
+                    RowLayout {
+                        spacing: 8
+                        ThemedButton {
+                            text: "Testar conexão"
+                            onClicked: { root.okDb = true; root.msgDb = "Testando…"; settings.testarMySQL() }
+                        }
+                        ThemedButton { text: "Exportar…"; secundario: true; onClicked: exportarConfigDialog.open() }
+                        ThemedButton { text: "Importar…"; secundario: true; onClicked: importarConfigDialog.open() }
+                    }
+                    ThemedText {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        text: root.msgDb
+                        color: root.okDb ? Theme.t.status.success : Theme.t.status.error
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ThemedButton {
+                    text: "Fechar"
+                    secundario: true
+                    onClicked: configDialog.close()
+                }
+                ThemedButton {
+                    text: "Salvar"
+                    onClicked: {
+                        if (settings.salvar()) {
+                            configDialog.close()
+                            root.mostrarToast("Configurações salvas")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- Layout principal ----------
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 20
+        spacing: 16
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            ColumnLayout {
+                spacing: 2
+                ThemedText { text: "Extrator de Boletos"; estilo: Theme.t.title }
+                ThemedText {
+                    text: viewModel.processando ? viewModel.progresso : viewModel.resumo
+                    estilo: Theme.t.subtitle
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            ThemedButton { text: "＋ Adicionar"; onClicked: abrirDialog.open() }
+            ThemedButton {
+                text: "Exportar CSV"
+                secundario: true
+                enabled: viewModel.quantidade > 0 && !viewModel.processando
+                onClicked: exportarDialog.open()
+            }
+            ThemedButton {
+                text: "Limpar"
+                secundario: true
+                enabled: viewModel.quantidade > 0 && !viewModel.processando
+                onClicked: { viewModel.limpar(); codigoInput.forceActiveFocus() }
+            }
+            ThemedButton {
+                text: "⚙"
+                secundario: true
+                implicitWidth: 44
+                onClicked: configDialog.open()
+            }
+        }
+
+        // ---------- Entrada pelo leitor de código de barras ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            ThemedInput {
+                id: codigoInput
+                Layout.fillWidth: true
+                implicitHeight: 44
+                placeholderText: "▮▯▮ Bipe o código de barras ou cole a linha digitável e pressione Enter  (Ctrl+L)"
+                font.family: Theme.t.mono.font.family
+                font.pixelSize: 15
+                maximumLength: 80
+                validator: RegularExpressionValidator { regularExpression: /[0-9 .\-]*/ }
+
+                function enviar() {
+                    if (text.trim().length === 0)
+                        return
+                    if (viewModel.adicionarCodigo(text)) {
+                        clear()
+                        lista.positionViewAtEnd()
+                    } else {
+                        selectAll()  // o próximo bipe substitui o texto
+                    }
+                    forceActiveFocus()
+                }
+
+                onAccepted: enviar()
+            }
+
+            ThemedButton {
+                text: "Inserir"
+                implicitHeight: 44
+                enabled: codigoInput.text.trim().length > 0
+                onClicked: codigoInput.enviar()
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            radius: 10
+            color: Theme.t.surface
+            border.width: dropArea.containsDrag ? 2 : 1
+            border.color: dropArea.containsDrag ? Theme.t.accent : Theme.t.table.border
+            clip: true
+
+            DropArea {
+                id: dropArea
+                anchors.fill: parent
+                keys: ["text/uri-list"]
+                onDropped: (drop) => viewModel.adicionarArquivos(drop.urls)
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 1
+                spacing: 0
+                visible: viewModel.quantidade > 0
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 40
+                    color: Theme.t.table.headerBackground
+                    radius: 10
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 16
+                        anchors.rightMargin: 16
+                        spacing: 12
+                        Repeater {
+                            model: root.colunas
+                            Text {
+                                text: modelData.t
+                                Layout.preferredWidth: modelData.w > 0 ? modelData.w : -1
+                                Layout.fillWidth: modelData.w < 0
+                                color: Theme.t.table.headerText
+                                font.family: Theme.t.table.headerFont.family
+                                font.pixelSize: Theme.t.table.headerFont.pixelSize
+                                font.weight: Theme.t.table.headerFont.weight
+                            }
+                        }
+                    }
+                }
+
+                ListView {
+                    id: lista
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    model: viewModel.resultados
+                    clip: true
+                    ScrollBar.vertical: ScrollBar {}
+
+                    delegate: Rectangle {
+                        id: linhaItem
+                        required property int index
+                        required property string arquivo
+                        required property string caminho
+                        required property int pagina
+                        required property string status
+                        required property string tipo
+                        required property string emissor
+                        required property string vencimento
+                        required property string valor
+                        required property string linha
+                        required property string linhaFormatada
+                        required property string mensagem
+                        required property string beneficiario
+                        required property string beneficiarioDoc
+                        required property string situacao
+                        required property string beneficiarioDetalhe
+                        required property bool protegido
+
+                        readonly property bool situacaoAlerta:
+                            situacao.length > 0 && situacao.toUpperCase() !== "ATIVA"
+
+                        width: lista.width
+                        height: 56
+                        color: hover.hovered ? Theme.t.table.rowHover
+                             : index % 2 ? Theme.t.table.rowAlternate : Theme.t.table.rowBackground
+
+                        HoverHandler { id: hover }
+
+                        ToolTip.visible: hover.hovered
+                        ToolTip.delay: 600
+                        ToolTip.text: caminho
+                            + (tipo ? "\nTipo: " + tipo : "")
+                            + (beneficiarioDetalhe ? "\n\n" + beneficiarioDetalhe : "")
+                            + (mensagem ? "\n\n" + mensagem : "")
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 16
+                            spacing: 12
+
+                            StatusPill { status: linhaItem.status; Layout.preferredWidth: 92 }
+                            ThemedText {
+                                Layout.preferredWidth: 160
+                                text: (linhaItem.protegido ? "🔒 " : "") + linhaItem.arquivo
+                                    + (linhaItem.pagina > 0 ? "  · p." + linhaItem.pagina : "")
+                            }
+
+                            ColumnLayout {
+                                Layout.preferredWidth: 230
+                                Layout.maximumWidth: 230
+                                spacing: 1
+                                ThemedText {
+                                    Layout.fillWidth: true
+                                    text: linhaItem.beneficiario || linhaItem.beneficiarioDoc || "—"
+                                    estilo: linhaItem.beneficiario ? Theme.t.body
+                                          : linhaItem.beneficiarioDoc ? Theme.t.mono : Theme.t.body
+                                }
+                                ThemedText {
+                                    Layout.fillWidth: true
+                                    visible: linhaItem.beneficiario.length > 0
+                                    estilo: Theme.t.subtitle
+                                    font.pixelSize: 11
+                                    text: linhaItem.beneficiarioDoc
+                                        + (linhaItem.situacao ? "  · " + linhaItem.situacao : "")
+                                    color: linhaItem.situacaoAlerta ? Theme.t.status.review
+                                                                    : Theme.t.subtitle.color
+                                }
+                            }
+
+                            ThemedText { text: linhaItem.emissor || "—"; Layout.preferredWidth: 130 }
+                            ThemedText { text: linhaItem.vencimento || "—"; Layout.preferredWidth: 100 }
+                            ThemedText {
+                                text: linhaItem.valor || "—"
+                                Layout.preferredWidth: 110
+                                estilo: linhaItem.valor ? Theme.t.mono : Theme.t.body
+                            }
+                            ThemedText {
+                                Layout.fillWidth: true
+                                text: linhaItem.linhaFormatada || linhaItem.mensagem
+                                estilo: linhaItem.linha ? Theme.t.mono : Theme.t.subtitle
+                            }
+                            ThemedButton {
+                                text: linhaItem.protegido ? "🔒 Senha" : "Copiar"
+                                secundario: !linhaItem.protegido
+                                Layout.preferredWidth: 90
+                                implicitHeight: 32
+                                enabled: linhaItem.protegido || linhaItem.linha.length > 0
+                                onClicked: linhaItem.protegido
+                                    ? viewModel.informarSenhaLinha(linhaItem.index)
+                                    : viewModel.copiar(linhaItem.linha)
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            width: parent.width
+                            height: 1
+                            color: Theme.t.table.border
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                anchors.centerIn: parent
+                visible: viewModel.quantidade === 0
+                spacing: 8
+                ThemedText {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "⬇"
+                    font.pixelSize: 48
+                    color: Theme.t.accent
+                }
+                ThemedText {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Arraste PDFs, imagens ou pastas aqui"
+                    estilo: Theme.t.title
+                }
+                ThemedText {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "ou clique em ＋ Adicionar, ou bipe o código no campo acima"
+                    estilo: Theme.t.subtitle
+                }
+            }
+        }
+
+        ThemedText {
+            text: "v" + appVersion
+            estilo: Theme.t.subtitle
+            Layout.alignment: Qt.AlignRight
+        }
+    }
+
+    // ---------- Notificação (toast) ----------
+    Rectangle {
+        id: toast
+        property alias texto: toastTexto.text
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 40
+        width: toastTexto.implicitWidth + 40
+        height: 42
+        radius: 21
+        color: Theme.t.button.background
+        opacity: 0
+        visible: opacity > 0
+        z: 200
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+
+        Text {
+            id: toastTexto
+            anchors.centerIn: parent
+            color: Theme.t.button.text
+            font.family: Theme.t.button.font.family
+            font.pixelSize: 14
+            font.weight: 600
+        }
+
+        Timer { id: toastTimer; interval: 2600; onTriggered: toast.opacity = 0 }
+    }
+}
 
 
 ================================================================================
@@ -1954,10 +4252,12 @@ from PySide6.QtCore import QObject, QRunnable, Signal
 from boleto_extractor.application.use_cases.extract_boleto import ExtractBoletoUseCase
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
+from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
 
 
 class WorkerSignals(QObject):
     concluido = Signal(int, object)  # (job_id, tuple[ExtractionResult, ...])
+    protegido = Signal(int, str)     # (job_id, caminho)
 
 
 class ExtractionWorker(QRunnable):
@@ -1972,6 +4272,11 @@ class ExtractionWorker(QRunnable):
         self._use_case = use_case
 
     def run(self) -> None:
+        # PDF protegido sem senha conhecida: vai para a fila de senha, sem extrair
+        if senhas_pdf.precisa_senha(self._arquivo):
+            self.signals.protegido.emit(self._job_id, str(self._arquivo))
+            return
+
         try:
             resultados = self._use_case.executar(self._arquivo)
         except Exception as exc:  # noqa: BLE001 - a interface nunca pode quebrar
@@ -1989,31 +4294,116 @@ class ExtractionWorker(QRunnable):
 ARQUIVO: src/boleto_extractor/presentation/viewmodels/main_viewmodel.py
 ================================================================================
 import csv
+import re
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QThreadPool, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
+from boleto_extractor.application.services.matching_service import (
+    ItemCruzamento,
+    ROTULOS,
+    StatusCruzamento,
+    cruzar,
+)
 from boleto_extractor.application.use_cases.extract_boleto import ExtractBoletoUseCase
 from boleto_extractor.core.config import settings
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
+from boleto_extractor.infrastructure.erp.erp_parcela_repository import ErpParcelaRepository
+from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
 from boleto_extractor.presentation.formatting import (
     formatar_linha,
     formatar_valor,
     formatar_valor_csv,
 )
 from boleto_extractor.presentation.viewmodels.extraction_worker import ExtractionWorker
-from boleto_extractor.presentation.viewmodels.result_list_model import ResultListModel
+from boleto_extractor.presentation.viewmodels.result_list_model import (
+    LinhaResultado,
+    ResultListModel,
+)
+
+_CABECALHO = [
+    "Arquivo", "Página", "Status", "Tipo", "Emissor", "Vencimento",
+    "Valor", "Linha digitável", "Código de barras", "Mensagem",
+    "Beneficiário documento", "Beneficiário tipo", "Razão social", "Nome fantasia",
+    "Situação cadastral", "Município", "UF", "E-mail", "Telefone",
+    "CNAE principal", "Porte", "Opção Simples", "Opção MEI",
+    "Documento (pag_cod)", "Status ERP", "Parcela ERP", "Detalhe ERP",
+]
+_MAX_TENTATIVAS = 3
+
+
+# ---------------- Utilitários de data/valor ----------------
+def _parse_data(texto: str) -> date | None:
+    dig = re.sub(r"\D", "", texto or "")
+    if len(dig) != 8:
+        return None
+    try:
+        return datetime.strptime(dig, "%d%m%Y").date()
+    except ValueError:
+        return None
+
+
+def _para_date(valor: object) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    return _parse_data(str(valor)) if valor else None
+
+
+def _para_decimal(valor: object) -> Decimal | None:
+    if valor is None or valor == "":
+        return None
+    try:
+        return Decimal(str(valor)).quantize(Decimal("0.01"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def vencimento_efetivo(item: LinhaResultado) -> date | None:
+    """Manual tem prioridade; senão, o vencimento extraído do código/PDF."""
+    return item.vencimento_manual or _para_date(item.vencimento)
+
+
+# ---------------- Worker de cruzamento ----------------
+class _SinaisCruzamento(QObject):
+    concluido = Signal(object, str)
+
+
+class _CruzamentoWorker(QRunnable):
+    def __init__(self, repo: ErpParcelaRepository, itens: list[ItemCruzamento]) -> None:
+        super().__init__()
+        self.signals = _SinaisCruzamento()
+        self._repo = repo
+        self._itens = itens
+
+    def run(self) -> None:
+        try:
+            parcelas = self._repo.parcelas_das_contas(i.documento for i in self._itens)
+            self.signals.concluido.emit(cruzar(self._itens, parcelas), "")
+        except Exception as exc:  # noqa: BLE001
+            self.signals.concluido.emit([], f"Erro no banco: {exc}")
 
 
 class MainViewModel(QObject):
     estadoChanged = Signal()
     notificacao = Signal(str)
+    senhaChanged = Signal()
+    cruzandoChanged = Signal()
 
-    def __init__(self, use_case: ExtractBoletoUseCase, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        use_case: ExtractBoletoUseCase,
+        repositorio: ErpParcelaRepository | None = None,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
         self._use_case = use_case
+        self._repo = repositorio
         self._model = ResultListModel(self)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(settings.max_workers)
@@ -2021,6 +4411,14 @@ class MainViewModel(QObject):
         self._proximo_id = 0
         self._total = 0
         self._concluidos = 0
+        # Fila de PDFs protegidos aguardando senha
+        self._fila_senha: list[tuple[int, Path]] = []
+        self._tentativas = 0
+        self._erro_senha = ""
+        self._atendidos = 0  # para "Arquivo X de Y"
+        # Cruzamento
+        self._cruzando = False
+        self._worker_cruzamento: _CruzamentoWorker | None = None
 
     @Property(QObject, constant=True)
     def resultados(self) -> ResultListModel:
@@ -2049,6 +4447,43 @@ class MainViewModel(QObject):
     @Property(int, notify=estadoChanged)
     def quantidade(self) -> int:
         return self._model.rowCount()
+
+    # ---------------- Propriedades do cruzamento ----------------
+    @Property(bool, notify=cruzandoChanged)
+    def cruzando(self) -> bool:
+        return self._cruzando
+
+    @Property(bool, constant=True)
+    def erpConfigurado(self) -> bool:
+        return self._repo is not None
+
+    def _set_cruzando(self, valor: bool) -> None:
+        self._cruzando = valor
+        self.cruzandoChanged.emit()
+
+    # ---------------- Propriedades da janela de senha ----------------
+    @Property(bool, notify=senhaChanged)
+    def senhaPendente(self) -> bool:
+        return bool(self._fila_senha)
+
+    @Property(str, notify=senhaChanged)
+    def senhaArquivo(self) -> str:
+        return self._fila_senha[0][1].name if self._fila_senha else ""
+
+    @Property(str, notify=senhaChanged)
+    def senhaPosicao(self) -> str:
+        if not self._fila_senha:
+            return ""
+        total = self._atendidos + len(self._fila_senha)
+        return f"Arquivo {self._atendidos + 1} de {total}"
+
+    @Property(int, notify=senhaChanged)
+    def senhaRestantes(self) -> int:
+        return len(self._fila_senha)
+
+    @Property(str, notify=senhaChanged)
+    def senhaErro(self) -> str:
+        return self._erro_senha
 
     def _novo_id(self) -> int:
         job_id = self._proximo_id
@@ -2089,14 +4524,17 @@ class MainViewModel(QObject):
         for arquivo in arquivos:
             job_id = self._novo_id()
             self._model.adicionar(job_id, arquivo)
-
-            worker = ExtractionWorker(job_id, arquivo, self._use_case)
-            worker.signals.concluido.connect(self._ao_concluir)
-            self._workers[job_id] = worker
-            self._total += 1
-            self._pool.start(worker)
+            self._iniciar(job_id, arquivo)
 
         self.estadoChanged.emit()
+
+    def _iniciar(self, job_id: int, arquivo: Path) -> None:
+        worker = ExtractionWorker(job_id, arquivo, self._use_case)
+        worker.signals.concluido.connect(self._ao_concluir)
+        worker.signals.protegido.connect(self._ao_protegido)
+        self._workers[job_id] = worker
+        self._total += 1
+        self._pool.start(worker)
 
     def _expandir(self, urls: list[object]) -> list[Path]:
         extensoes = set(settings.supported_extensions)
@@ -2115,16 +4553,189 @@ class MainViewModel(QObject):
 
         return arquivos
 
+    def _contar_concluido(self) -> None:
+        self._concluidos += 1
+        if self._concluidos >= self._total:
+            self._total = self._concluidos = 0
+            self.notificacao.emit("Processamento concluído.")
+        self.estadoChanged.emit()
+
     @Slot(int, object)
     def _ao_concluir(self, job_id: int, resultados: tuple[ExtractionResult, ...]) -> None:
         self._workers.pop(job_id, None)
         self._model.atualizar(job_id, resultados)
-        self._concluidos += 1
+        self._contar_concluido()
 
-        if self._concluidos >= self._total:
-            self._total = self._concluidos = 0
-            self.notificacao.emit("Processamento concluído.")
+    @Slot(int, str)
+    def _ao_protegido(self, job_id: int, caminho: str) -> None:
+        self._workers.pop(job_id, None)
+        self._model.marcar_protegido(job_id)
+        if all(j != job_id for j, _ in self._fila_senha):
+            self._fila_senha.append((job_id, Path(caminho)))
+            self.senhaChanged.emit()
+        self._contar_concluido()
 
+    # ---------------- Fila de senha ----------------
+    def _reprocessar(self, job_id: int, arquivo: Path) -> None:
+        self._model.reabrir(job_id)
+        self._iniciar(job_id, arquivo)
+        self.estadoChanged.emit()
+
+    def _avancar(self) -> None:
+        self._fila_senha.pop(0)
+        self._atendidos += 1
+        self._tentativas = 0
+        self._erro_senha = ""
+        if not self._fila_senha:
+            self._atendidos = 0
+        self.senhaChanged.emit()
+
+    @Slot(str, bool, bool, result=bool)
+    def informarSenha(self, senha: str, usar_nos_proximos: bool, lembrar: bool) -> bool:
+        if not self._fila_senha:
+            return False
+        job_id, arquivo = self._fila_senha[0]
+
+        if not senhas_pdf.informar(arquivo, senha, usar_nos_proximos, lembrar):
+            self._tentativas += 1
+            if self._tentativas >= _MAX_TENTATIVAS:
+                self.notificacao.emit(f"🔒 {arquivo.name}: tentativas esgotadas. Arquivo pulado.")
+                self._avancar()
+            else:
+                self._erro_senha = f"Senha incorreta ({self._tentativas}/{_MAX_TENTATIVAS})."
+                self.senhaChanged.emit()
+            return False
+
+        self._avancar()
+        self._reprocessar(job_id, arquivo)
+        abertos = 1
+
+        # A mesma senha pode abrir os próximos arquivos do mesmo emissor
+        if usar_nos_proximos:
+            for item in list(self._fila_senha):
+                if not senhas_pdf.precisa_senha(item[1]):
+                    self._fila_senha.remove(item)
+                    self._atendidos += 1
+                    self._reprocessar(*item)
+                    abertos += 1
+            if not self._fila_senha:
+                self._atendidos = 0
+            self.senhaChanged.emit()
+
+        self.notificacao.emit(f"🔓 {abertos} arquivo(s) desbloqueado(s)")
+        return True
+
+    @Slot()
+    def pularSenha(self) -> None:
+        if self._fila_senha:
+            self._avancar()
+
+    @Slot()
+    def pularTodasSenhas(self) -> None:
+        self._fila_senha.clear()
+        self._atendidos = 0
+        self._tentativas = 0
+        self._erro_senha = ""
+        self.senhaChanged.emit()
+
+    @Slot(int)
+    def informarSenhaLinha(self, linha: int) -> None:
+        """Chamado pelo botão 🔒 da tabela, para tentar de novo um arquivo pulado."""
+        item = self._model.item(linha)
+        if item is None or not item.protegido:
+            return
+        self._fila_senha = [(j, a) for j, a in self._fila_senha if j != item.job_id]
+        self._fila_senha.insert(0, (item.job_id, item.caminho))
+        self._tentativas = 0
+        self._erro_senha = ""
+        self.senhaChanged.emit()
+
+    # ---------------- Edição para o cruzamento ----------------
+    @Slot(int, str)
+    def definirDocumento(self, linha: int, texto: str) -> None:
+        item = self._model.item(linha)
+        if item is None:
+            return
+        dig = re.sub(r"\D", "", texto or "")
+        novo = int(dig) if dig else None
+        campos: dict[str, object] = {"erro_documento": False}
+        if novo != item.documento:
+            campos |= {"documento": novo, "cruzamento": None}
+        self._model.alterar(linha, **campos)
+
+    @Slot(int, str)
+    def definirVencimento(self, linha: int, texto: str) -> None:
+        item = self._model.item(linha)
+        if item is None or _para_date(item.vencimento):
+            return  # vencimento vindo da extração fica travado
+        digitos = re.sub(r"\D", "", texto or "")
+        nova = _parse_data(texto)
+        if digitos and nova is None:
+            self._model.alterar(linha, erro_data=True)
+            self.notificacao.emit(f"⚠ Data inválida na linha {linha + 1}")
+            return
+        campos: dict[str, object] = {"erro_data": nova is None}
+        if nova != item.vencimento_manual:
+            campos |= {"vencimento_manual": nova, "cruzamento": None}
+        self._model.alterar(linha, **campos)
+
+    @Slot(int, result=bool)
+    def vencimentoEditavel(self, linha: int) -> bool:
+        item = self._model.item(linha)
+        return item is not None and _para_date(item.vencimento) is None
+
+    # ---------------- Cruzamento ----------------
+    @Slot()
+    def cruzar(self) -> None:
+        if self._repo is None:
+            self.notificacao.emit("⚠ Configure a conexão com o ERP antes de cruzar.")
+            return
+        if self._cruzando or self.processando:
+            return
+
+        elegiveis = [
+            (i, it) for i, it in enumerate(self._model.itens())
+            if it.status == ExtractionStatus.SUCCESS and it.codigo
+        ]
+        if not elegiveis:
+            self.notificacao.emit("Nenhum boleto válido para cruzar.")
+            return
+
+        pendentes = 0
+        itens: list[ItemCruzamento] = []
+        for linha, it in elegiveis:
+            venc = vencimento_efetivo(it)
+            valor = _para_decimal(it.valor)
+            erro_doc, erro_data = it.documento is None, venc is None
+            self._model.alterar(linha, erro_documento=erro_doc, erro_data=erro_data)
+            if erro_doc or erro_data or valor is None:
+                pendentes += 1
+                continue
+            itens.append(ItemCruzamento(it.codigo, it.documento, venc, valor))
+
+        if pendentes:
+            self.notificacao.emit(
+                f"⚠ {pendentes} linha(s) sem documento ou data. Preencha os campos em vermelho."
+            )
+            return
+
+        self._set_cruzando(True)
+        self.notificacao.emit("Consultando ERP…")
+        worker = _CruzamentoWorker(self._repo, itens)
+        worker.signals.concluido.connect(self._ao_cruzar)
+        self._worker_cruzamento = worker
+        self._pool.start(worker)
+
+    @Slot(object, str)
+    def _ao_cruzar(self, resultados: list, erro: str) -> None:
+        self._worker_cruzamento = None
+        self._set_cruzando(False)
+        if erro:
+            self.notificacao.emit(f"⛔ {erro}")
+            return
+        self._model.aplicar_cruzamento({r.chave: r for r in resultados})
+        ok = sum(1 for r in resultados if r.status == StatusCruzamento.ENCONTRADO)
+        self.notificacao.emit(f"🔗 Cruzamento concluído: {ok}/{len(resultados)} encontrado(s)")
         self.estadoChanged.emit()
 
     # ---------------- Ações ----------------
@@ -2134,30 +4745,45 @@ class MainViewModel(QObject):
             QGuiApplication.clipboard().setText(texto)
             self.notificacao.emit("Linha digitável copiada!")
 
+    @staticmethod
+    def _linha_csv(item: LinhaResultado) -> list[object]:
+        b = item.beneficiario
+        e = item.empresa
+        c = item.cruzamento
+        venc = vencimento_efetivo(item)
+        return [
+            item.caminho.name, item.pagina or "", item.status, item.tipo,
+            item.emissor, venc.strftime("%d/%m/%Y") if venc else "",
+            formatar_valor_csv(item.valor),
+            formatar_linha(item.linha), item.codigo, item.mensagem,
+            b.documento_formatado if b else "", b.tipo if b else "",
+            e.razao_social, e.nome_fantasia, e.situacao_cadastral, e.municipio, e.uf,
+            e.email, e.telefone, e.cnae_principal, e.porte_empresa,
+            e.opcao_simples, e.opcao_mei,
+            item.documento or "",
+            ROTULOS[c.status] if c else "",
+            c.parcela.rotulo if c and c.parcela else "",
+            c.detalhe if c else "",
+        ]
+
     @Slot(QUrl)
     def exportarCsv(self, url: QUrl) -> None:
         destino = Path(url.toLocalFile())
         try:
             with destino.open("w", newline="", encoding="utf-8-sig") as f:
                 escritor = csv.writer(f, delimiter=";")
-                escritor.writerow([
-                    "Arquivo", "Página", "Status", "Tipo", "Emissor", "Vencimento",
-                    "Valor", "Linha digitável", "Código de barras", "Mensagem",
-                ])
+                escritor.writerow(_CABECALHO)
                 for item in self._model.itens():
-                    escritor.writerow([
-                        item.caminho.name, item.pagina or "", item.status, item.tipo,
-                        item.emissor, item.vencimento, formatar_valor_csv(item.valor),
-                        formatar_linha(item.linha), item.codigo, item.mensagem,
-                    ])
+                    escritor.writerow(self._linha_csv(item))
             self.notificacao.emit(f"Exportado para {destino.name}")
         except OSError as exc:
             self.notificacao.emit(f"Falha ao exportar: {exc}")
 
     @Slot()
     def limpar(self) -> None:
-        if not self.processando:
+        if not self.processando and not self._cruzando:
             self._model.limpar()
+            self.pularTodasSenhas()
             self.estadoChanged.emit()
 
 
@@ -2177,6 +4803,7 @@ from PySide6.QtCore import (
     Qt,
 )
 
+from boleto_extractor.domain.entities.beneficiario import Beneficiario, DadosEmpresa
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.boleto_type import BoletoType
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
@@ -2195,8 +4822,11 @@ TIPOS = {
 _CAMPOS = (
     "arquivo", "caminho", "pagina", "status", "tipo", "emissor", "vencimento",
     "valor", "linha", "linhaFormatada", "codigo", "mensagem",
+    "beneficiario", "beneficiarioDoc", "situacao", "beneficiarioDetalhe", "protegido",
 )
 _BASE = Qt.ItemDataRole.UserRole.value + 1
+_VAZIA = DadosEmpresa()
+MSG_PROTEGIDO = "🔒 PDF protegido por senha. Clique em 🔒 Senha para informar."
 
 
 @dataclass(slots=True)
@@ -2212,6 +4842,44 @@ class LinhaResultado:
     linha: str = ""
     codigo: str = ""
     mensagem: str = "Na fila…"
+    beneficiario: Beneficiario | None = None
+    protegido: bool = False
+
+    @property
+    def empresa(self) -> DadosEmpresa:
+        if self.beneficiario and self.beneficiario.empresa:
+            return self.beneficiario.empresa
+        return _VAZIA
+
+    @property
+    def documento(self) -> str:
+        return self.beneficiario.documento_formatado if self.beneficiario else ""
+
+    def detalhe_beneficiario(self) -> str:
+        b = self.beneficiario
+        if b is None:
+            return ""
+        e = self.empresa
+        local = " / ".join(x for x in (e.municipio, e.uf) if x)
+        pares = (
+            (b.tipo, b.documento_formatado),
+            ("Razão social", e.razao_social),
+            ("Fantasia", e.nome_fantasia),
+            ("Situação", e.situacao_cadastral),
+            ("Local", local),
+            ("Telefone", e.telefone),
+            ("E-mail", e.email),
+            ("CNAE", e.cnae_principal),
+            ("Porte", e.porte_empresa),
+            ("Simples", e.opcao_simples),
+            ("MEI", e.opcao_mei),
+        )
+        linhas = [f"{k}: {v}" for k, v in pares if v]
+        if b.confirmado_pelo_codigo:
+            linhas.append("✔ CNPJ confirmado pelo código de barras")
+        if b.tipo == "CNPJ" and b.empresa is None:
+            linhas.append("Dados da empresa indisponíveis no momento")
+        return "\n".join(linhas)
 
 
 class ResultListModel(QAbstractListModel):
@@ -2233,6 +4901,10 @@ class ResultListModel(QAbstractListModel):
             return None
 
         item = self._itens[index.row()]
+        campo = _CAMPOS[posicao]
+        if campo == "beneficiarioDetalhe":
+            return item.detalhe_beneficiario()
+
         valores: dict[str, object] = {
             "arquivo": item.caminho.name,
             "caminho": str(item.caminho),
@@ -2246,8 +4918,26 @@ class ResultListModel(QAbstractListModel):
             "linhaFormatada": formatar_linha(item.linha),
             "codigo": item.codigo,
             "mensagem": item.mensagem,
+            "beneficiario": item.beneficiario.nome if item.beneficiario else "",
+            "beneficiarioDoc": item.documento,
+            "situacao": item.empresa.situacao_cadastral,
+            "protegido": item.protegido,
         }
-        return valores[_CAMPOS[posicao]]
+        return valores[campo]
+
+    def _linha_do_job(self, job_id: int, **filtro: object) -> int | None:
+        return next(
+            (
+                i for i, item in enumerate(self._itens)
+                if item.job_id == job_id
+                and all(getattr(item, k) == v for k, v in filtro.items())
+            ),
+            None,
+        )
+
+    def _notificar(self, linha: int) -> None:
+        indice = self.index(linha)
+        self.dataChanged.emit(indice, indice)
 
     def adicionar(self, job_id: int, caminho: Path) -> None:
         linha = len(self._itens)
@@ -2265,20 +4955,13 @@ class ResultListModel(QAbstractListModel):
         self.endInsertRows()
 
     def atualizar(self, job_id: int, resultados: tuple[ExtractionResult, ...]) -> None:
-        linha = next(
-            (
-                i for i, item in enumerate(self._itens)
-                if item.job_id == job_id and item.status == ExtractionStatus.PENDING.value
-            ),
-            None,
-        )
+        linha = self._linha_do_job(job_id, status=ExtractionStatus.PENDING.value)
         if linha is None or not resultados:
             return
 
         primeiro, *resto = resultados
         self._preencher(self._itens[linha], primeiro)
-        indice = self.index(linha)
-        self.dataChanged.emit(indice, indice)
+        self._notificar(linha)
 
         if resto:
             self.beginInsertRows(QModelIndex(), linha + 1, linha + len(resto))
@@ -2288,10 +4971,37 @@ class ResultListModel(QAbstractListModel):
                 self._itens.insert(linha + deslocamento, item)
             self.endInsertRows()
 
+    # ---------------- PDF protegido ----------------
+    def marcar_protegido(self, job_id: int) -> None:
+        linha = self._linha_do_job(job_id, status=ExtractionStatus.PENDING.value)
+        if linha is None:
+            return
+        item = self._itens[linha]
+        item.status = ExtractionStatus.REVIEW.value
+        item.mensagem = MSG_PROTEGIDO
+        item.protegido = True
+        self._notificar(linha)
+
+    def reabrir(self, job_id: int) -> None:
+        """Volta o item protegido para a fila de processamento."""
+        linha = self._linha_do_job(job_id, protegido=True)
+        if linha is None:
+            return
+        item = self._itens[linha]
+        item.status = ExtractionStatus.PENDING.value
+        item.mensagem = "Na fila…"
+        item.protegido = False
+        self._notificar(linha)
+
+    def item(self, linha: int) -> LinhaResultado | None:
+        return self._itens[linha] if 0 <= linha < len(self._itens) else None
+
     def _preencher(self, item: LinhaResultado, resultado: ExtractionResult) -> None:
         item.status = resultado.status.value
         item.pagina = resultado.pagina
         item.mensagem = " | ".join(resultado.mensagens)
+        item.beneficiario = resultado.beneficiario
+        item.protegido = False
 
         boleto = resultado.boleto
         if boleto is None:
@@ -2327,6 +5037,282 @@ class ResultListModel(QAbstractListModel):
 
     def itens(self) -> tuple[LinhaResultado, ...]:
         return tuple(self._itens)
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/presentation/viewmodels/settings_viewmodel.py
+================================================================================
+from __future__ import annotations
+
+import json
+import shutil
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from PySide6.QtCore import Property, QObject, QSettings, QStandardPaths, QUrl, Signal, Slot
+
+KEYRING_SERVICO = "BoletoExtractor-MySQL"
+
+PADROES: dict[str, Any] = {
+    "bq_ativo": False,
+    "bq_credencial": "",
+    "bq_projeto": "",
+    "bq_tabela": "basedosdados.br_me_cnpj.estabelecimentos",
+    "bq_limite_gb": 5,
+    "db_ativo": False,
+    "db_host": "localhost",
+    "db_porta": 3306,
+    "db_banco": "",
+    "db_usuario": "",
+    "db_ssl": False,
+}
+
+
+def _prop(tipo: type, chave: str, sinal: Signal) -> Property:
+    def getter(self: "SettingsViewModel"):
+        return self._dados[chave]
+
+    def setter(self: "SettingsViewModel", valor) -> None:
+        if self._dados[chave] != valor:
+            self._dados[chave] = valor
+            sinal.__get__(self).emit()
+
+    return Property(tipo, getter, setter, notify=sinal)
+
+
+def _caminho(url: QUrl | str) -> Path:
+    if isinstance(url, QUrl):
+        return Path(url.toLocalFile())
+    texto = str(url)
+    return Path(QUrl(texto).toLocalFile() if texto.startswith("file:") else texto)
+
+
+class SettingsViewModel(QObject):
+    alterado = Signal()
+    testeConcluido = Signal(str, bool, str)  # tipo ("bq" | "db"), ok, mensagem
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._qs = QSettings()
+        self._dados: dict[str, Any] = {}
+        self._senha = ""
+        self._carregar()
+
+    # ---------------- Propriedades expostas ao QML ----------------
+    bqAtivo = _prop(bool, "bq_ativo", alterado)
+    bqCredencial = _prop(str, "bq_credencial", alterado)
+    bqProjeto = _prop(str, "bq_projeto", alterado)
+    bqTabela = _prop(str, "bq_tabela", alterado)
+    bqLimiteGb = _prop(int, "bq_limite_gb", alterado)
+    dbAtivo = _prop(bool, "db_ativo", alterado)
+    dbHost = _prop(str, "db_host", alterado)
+    dbPorta = _prop(int, "db_porta", alterado)
+    dbBanco = _prop(str, "db_banco", alterado)
+    dbUsuario = _prop(str, "db_usuario", alterado)
+    dbSsl = _prop(bool, "db_ssl", alterado)
+
+    def _get_senha(self) -> str:
+        return self._senha
+
+    def _set_senha(self, valor: str) -> None:
+        self._senha = valor
+
+    dbSenha = Property(str, _get_senha, _set_senha, notify=alterado)
+
+    def _get_senha_salva(self) -> bool:
+        return bool(self.senha_mysql())
+
+    dbSenhaSalva = Property(bool, _get_senha_salva, notify=alterado)
+
+    # ---------------- Persistência ----------------
+    def _carregar(self) -> None:
+        for chave, padrao in PADROES.items():
+            self._dados[chave] = self._qs.value(chave, padrao, type=type(padrao))
+
+    def senha_mysql(self) -> str:
+        if self._senha:
+            return self._senha
+        try:
+            import keyring
+            return keyring.get_password(KEYRING_SERVICO, self._dados["db_usuario"] or "_") or ""
+        except Exception:
+            return ""
+
+    def valores(self) -> dict[str, Any]:
+        return dict(self._dados)
+
+    @Slot(result=bool)
+    def salvar(self) -> bool:
+        for chave, valor in self._dados.items():
+            self._qs.setValue(chave, valor)
+        self._qs.sync()
+
+        if self._senha:
+            try:
+                import keyring
+                keyring.set_password(KEYRING_SERVICO, self._dados["db_usuario"] or "_", self._senha)
+                self._senha = ""
+            except Exception as exc:
+                self.testeConcluido.emit("db", False, f"Senha não salva no cofre: {exc}")
+                return False
+
+        self.alterado.emit()
+        return True
+
+    # ---------------- Credencial BigQuery ----------------
+    @Slot("QVariant")
+    def importarCredencial(self, url) -> None:
+        origem = _caminho(url)
+        try:
+            dados = json.loads(origem.read_text(encoding="utf-8"))
+            if dados.get("type") != "service_account":
+                raise ValueError("o arquivo não é uma chave de conta de serviço")
+
+            pasta = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+            pasta.mkdir(parents=True, exist_ok=True)
+            destino = pasta / "bigquery_credencial.json"
+            shutil.copyfile(origem, destino)
+
+            self.bqCredencial = str(destino)
+            if not self._dados["bq_projeto"] and dados.get("project_id"):
+                self.bqProjeto = dados["project_id"]
+            self.testeConcluido.emit("bq", True, f"Credencial importada: {dados.get('client_email', '')}")
+        except Exception as exc:
+            self.testeConcluido.emit("bq", False, f"Falha ao importar credencial: {exc}")
+
+    @Slot()
+    def removerCredencial(self) -> None:
+        caminho = Path(self._dados["bq_credencial"]) if self._dados["bq_credencial"] else None
+        if caminho and caminho.exists():
+            caminho.unlink(missing_ok=True)
+        self.bqCredencial = ""
+        self.testeConcluido.emit("bq", True, "Credencial removida")
+
+    # ---------------- Testes de conexão (em thread) ----------------
+    @Slot()
+    def testarBigQuery(self) -> None:
+        cfg = self.valores()
+        threading.Thread(target=self._testar_bq, args=(cfg,), daemon=True).start()
+
+    def _testar_bq(self, cfg: dict[str, Any]) -> None:
+        try:
+            from google.cloud import bigquery
+            from google.oauth2 import service_account
+
+            if not cfg["bq_credencial"]:
+                raise ValueError("importe a credencial primeiro")
+
+            cred = service_account.Credentials.from_service_account_file(cfg["bq_credencial"])
+            cliente = bigquery.Client(credentials=cred, project=cfg["bq_projeto"] or cred.project_id)
+            job = cliente.query(
+                f"SELECT cnpj_basico FROM `{cfg['bq_tabela']}` LIMIT 1",
+                job_config=bigquery.QueryJobConfig(dry_run=True, use_query_cache=False),
+            )
+            gb = (job.total_bytes_processed or 0) / 1024**3
+            limite = cfg["bq_limite_gb"]
+            ok = gb <= limite
+            self.testeConcluido.emit(
+                "bq", ok,
+                f"Conectado. Consulta estimada: {gb:.2f} GB (limite {limite} GB)"
+                + ("" if ok else " — acima do limite!"),
+            )
+        except ImportError:
+            self.testeConcluido.emit("bq", False, "Instale: pip install google-cloud-bigquery")
+        except Exception as exc:
+            self.testeConcluido.emit("bq", False, f"Erro: {exc}")
+
+    # ---------------- Teste de consulta real de CNPJ ----------------
+    @Slot(str)
+    def testarConsultaCnpj(self, cnpj: str) -> None:
+        cfg = self.valores()
+        cfg["bq_ativo"] = True  # testa mesmo com o checkbox desmarcado
+        self.testeConcluido.emit("bq", True, f"Consultando {cnpj}… (pode levar alguns segundos)")
+        threading.Thread(target=self._testar_cnpj, args=(cfg, cnpj), daemon=True).start()
+
+    def _testar_cnpj(self, cfg: dict[str, Any], cnpj: str) -> None:
+        try:
+            from boleto_extractor.infrastructure.cnpj.bigquery_cnpj_client import BigQueryCnpjClient
+
+            if not cfg["bq_credencial"]:
+                raise ValueError("importe a credencial primeiro")
+
+            cliente = BigQueryCnpjClient(lambda: cfg)
+            inicio = time.perf_counter()
+            dados = cliente.consultar(cnpj)
+            segundos = time.perf_counter() - inicio
+
+            if dados is None:
+                self.testeConcluido.emit(
+                    "bq", False, f"CNPJ não encontrado na base ({segundos:.1f}s). Confira os 14 dígitos."
+                )
+                return
+
+            self.testeConcluido.emit(
+                "bq", True,
+                f"✔ {dados.razao_social or '(sem razão social)'}"
+                f"{' — ' + dados.nome_fantasia if dados.nome_fantasia else ''}\n"
+                f"Situação: {dados.situacao} | UF: {dados.uf} | {segundos:.1f}s",
+            )
+        except ImportError:
+            self.testeConcluido.emit("bq", False, "Instale: pip install google-cloud-bigquery")
+        except Exception as exc:
+            texto = str(exc)
+            if "bytesBilledLimitExceeded" in texto or "bytes billed" in texto.lower():
+                texto = "Consulta passou do limite de GB. Aumente o limite e teste de novo."
+            self.testeConcluido.emit("bq", False, f"Erro: {texto}")
+
+    @Slot()
+    def testarMySQL(self) -> None:
+        cfg = self.valores()
+        senha = self.senha_mysql()
+        threading.Thread(target=self._testar_db, args=(cfg, senha), daemon=True).start()
+
+    def _testar_db(self, cfg: dict[str, Any], senha: str) -> None:
+        try:
+            import pymysql
+
+            conexao = pymysql.connect(
+                host=cfg["db_host"],
+                port=int(cfg["db_porta"]),
+                user=cfg["db_usuario"],
+                password=senha,
+                database=cfg["db_banco"] or None,
+                ssl={"ssl": {}} if cfg["db_ssl"] else None,
+                connect_timeout=5,
+            )
+            with conexao, conexao.cursor() as cur:
+                cur.execute("SELECT VERSION()")
+                versao = cur.fetchone()[0]
+            self.testeConcluido.emit("db", True, f"Conectado ao MySQL {versao}")
+        except ImportError:
+            self.testeConcluido.emit("db", False, "Instale: pip install pymysql")
+        except Exception as exc:
+            self.testeConcluido.emit("db", False, f"Erro: {exc}")
+
+    # ---------------- Exportar / importar (sem senha) ----------------
+    @Slot("QVariant")
+    def exportar(self, url) -> None:
+        try:
+            dados = {k: self._qs.value(k, v, type=type(v)) for k, v in PADROES.items()}
+            dados.pop("bq_credencial", None)
+            _caminho(url).write_text(json.dumps(dados, indent=2, ensure_ascii=False), encoding="utf-8")
+            self.testeConcluido.emit("db", True, "Configuração exportada (sem senha e sem credencial)")
+        except Exception as exc:
+            self.testeConcluido.emit("db", False, f"Falha ao exportar: {exc}")
+
+    @Slot("QVariant")
+    def importar(self, url) -> None:
+        try:
+            dados = json.loads(_caminho(url).read_text(encoding="utf-8"))
+            for chave, padrao in PADROES.items():
+                if chave in dados and chave != "bq_credencial":
+                    self._dados[chave] = type(padrao)(dados[chave])
+            self.alterado.emit()
+            self.testeConcluido.emit("db", True, "Configuração importada — clique em Salvar")
+        except Exception as exc:
+            self.testeConcluido.emit("db", False, f"Falha ao importar: {exc}")
 
 
 ================================================================================
@@ -2434,6 +5420,32 @@ def test_extrair_linha_digitavel_de_boleto_real() -> None:
         print(f"Linha digitável: {linha}")
 
         assert len(linha) == 47
+
+
+================================================================================
+ARQUIVO: tests/test_beneficiario.py
+================================================================================
+from boleto_extractor.application.services.beneficiario_extractor import BeneficiarioExtractor
+from boleto_extractor.application.services.documento_validator import cnpj_valido, cpf_valido
+
+
+def test_validadores() -> None:
+    assert cnpj_valido("11.222.333/0001-81")
+    assert not cnpj_valido("11.222.333/0001-80")
+    assert cnpj_valido("12ABC34501DE35")  # alfanumérico
+    assert cpf_valido("529.982.247-25")
+
+
+def test_separa_beneficiario_do_pagador() -> None:
+    texto = "Pagador: Fulano CPF 529.982.247-25\nBeneficiário: ACME LTDA 11.222.333/0001-81"
+    achado = BeneficiarioExtractor().extrair(texto)
+    assert achado is not None and achado.documento == "11222333000181"
+
+
+def test_raiz_do_codigo_tem_prioridade() -> None:
+    texto = "Beneficiário 11.444.777/0001-61  Outro 11.222.333/0001-81"
+    achado = BeneficiarioExtractor().extrair(texto, raiz_cnpj="11222333")
+    assert achado is not None and achado.confirmado_pelo_codigo
 
 
 ================================================================================
