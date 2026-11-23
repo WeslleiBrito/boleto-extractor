@@ -30,10 +30,11 @@ TIPOS = {
 _CAMPOS = (
     "arquivo", "caminho", "pagina", "status", "tipo", "emissor", "vencimento",
     "valor", "linha", "linhaFormatada", "codigo", "mensagem",
-    "beneficiario", "beneficiarioDoc", "situacao", "beneficiarioDetalhe",
+    "beneficiario", "beneficiarioDoc", "situacao", "beneficiarioDetalhe", "protegido",
 )
 _BASE = Qt.ItemDataRole.UserRole.value + 1
 _VAZIA = DadosEmpresa()
+MSG_PROTEGIDO = "🔒 PDF protegido por senha. Clique em 🔒 Senha para informar."
 
 
 @dataclass(slots=True)
@@ -50,6 +51,7 @@ class LinhaResultado:
     codigo: str = ""
     mensagem: str = "Na fila…"
     beneficiario: Beneficiario | None = None
+    protegido: bool = False
 
     @property
     def empresa(self) -> DadosEmpresa:
@@ -127,8 +129,23 @@ class ResultListModel(QAbstractListModel):
             "beneficiario": item.beneficiario.nome if item.beneficiario else "",
             "beneficiarioDoc": item.documento,
             "situacao": item.empresa.situacao_cadastral,
+            "protegido": item.protegido,
         }
         return valores[campo]
+
+    def _linha_do_job(self, job_id: int, **filtro: object) -> int | None:
+        return next(
+            (
+                i for i, item in enumerate(self._itens)
+                if item.job_id == job_id
+                and all(getattr(item, k) == v for k, v in filtro.items())
+            ),
+            None,
+        )
+
+    def _notificar(self, linha: int) -> None:
+        indice = self.index(linha)
+        self.dataChanged.emit(indice, indice)
 
     def adicionar(self, job_id: int, caminho: Path) -> None:
         linha = len(self._itens)
@@ -146,20 +163,13 @@ class ResultListModel(QAbstractListModel):
         self.endInsertRows()
 
     def atualizar(self, job_id: int, resultados: tuple[ExtractionResult, ...]) -> None:
-        linha = next(
-            (
-                i for i, item in enumerate(self._itens)
-                if item.job_id == job_id and item.status == ExtractionStatus.PENDING.value
-            ),
-            None,
-        )
+        linha = self._linha_do_job(job_id, status=ExtractionStatus.PENDING.value)
         if linha is None or not resultados:
             return
 
         primeiro, *resto = resultados
         self._preencher(self._itens[linha], primeiro)
-        indice = self.index(linha)
-        self.dataChanged.emit(indice, indice)
+        self._notificar(linha)
 
         if resto:
             self.beginInsertRows(QModelIndex(), linha + 1, linha + len(resto))
@@ -169,11 +179,37 @@ class ResultListModel(QAbstractListModel):
                 self._itens.insert(linha + deslocamento, item)
             self.endInsertRows()
 
+    # ---------------- PDF protegido ----------------
+    def marcar_protegido(self, job_id: int) -> None:
+        linha = self._linha_do_job(job_id, status=ExtractionStatus.PENDING.value)
+        if linha is None:
+            return
+        item = self._itens[linha]
+        item.status = ExtractionStatus.REVIEW.value
+        item.mensagem = MSG_PROTEGIDO
+        item.protegido = True
+        self._notificar(linha)
+
+    def reabrir(self, job_id: int) -> None:
+        """Volta o item protegido para a fila de processamento."""
+        linha = self._linha_do_job(job_id, protegido=True)
+        if linha is None:
+            return
+        item = self._itens[linha]
+        item.status = ExtractionStatus.PENDING.value
+        item.mensagem = "Na fila…"
+        item.protegido = False
+        self._notificar(linha)
+
+    def item(self, linha: int) -> LinhaResultado | None:
+        return self._itens[linha] if 0 <= linha < len(self._itens) else None
+
     def _preencher(self, item: LinhaResultado, resultado: ExtractionResult) -> None:
         item.status = resultado.status.value
         item.pagina = resultado.pagina
         item.mensagem = " | ".join(resultado.mensagens)
         item.beneficiario = resultado.beneficiario
+        item.protegido = False
 
         boleto = resultado.boleto
         if boleto is None:

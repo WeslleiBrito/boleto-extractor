@@ -223,6 +223,121 @@ ApplicationWindow {
         }
     }
 
+    // ---------- Janela de senha do PDF ----------
+    Dialog {
+        id: senhaDialog
+        modal: true
+        anchors.centerIn: parent
+        width: 480
+        padding: 24
+        closePolicy: Popup.NoAutoClose
+        property string arquivoAtual: ""
+
+        function enviar() {
+            if (senhaInput.text.length === 0)
+                return
+            viewModel.informarSenha(senhaInput.text, usarProximos.checked, lembrarSenha.checked)
+            senhaInput.clear()
+            senhaInput.forceActiveFocus()
+        }
+
+        onOpened: senhaInput.forceActiveFocus()
+        onClosed: codigoInput.forceActiveFocus()
+
+        background: Rectangle {
+            color: Theme.t.surface
+            radius: 12
+            border.color: Theme.t.accent
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            ThemedText { text: "🔒 PDF protegido por senha"; estilo: Theme.t.title }
+            ThemedText { text: viewModel.senhaPosicao; estilo: Theme.t.subtitle }
+            ThemedText {
+                Layout.fillWidth: true
+                text: viewModel.senhaArquivo
+                estilo: Theme.t.mono
+            }
+
+            ThemedInput {
+                id: senhaInput
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+                placeholderText: "Digite a senha do arquivo e pressione Enter"
+                onAccepted: senhaDialog.enviar()
+            }
+
+            ThemedText {
+                Layout.fillWidth: true
+                visible: viewModel.senhaErro.length > 0
+                text: viewModel.senhaErro
+                color: Theme.t.status.invalid
+            }
+
+            ThemedCheck {
+                id: usarProximos
+                checked: true
+                text: "Usar esta senha nos próximos arquivos (só nesta sessão)"
+            }
+            ThemedCheck {
+                id: lembrarSenha
+                checked: false
+                text: "Lembrar senha (cofre do Windows)"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                ThemedButton {
+                    text: "Pular todos"
+                    secundario: true
+                    visible: viewModel.senhaRestantes > 1
+                    onClicked: viewModel.pularTodasSenhas()
+                }
+                Item { Layout.fillWidth: true }
+                ThemedButton {
+                    text: "Pular"
+                    secundario: true
+                    onClicked: { senhaInput.clear(); viewModel.pularSenha() }
+                }
+                ThemedButton {
+                    text: "Abrir"
+                    enabled: senhaInput.text.length > 0
+                    onClicked: senhaDialog.enviar()
+                }
+            }
+        }
+
+        Shortcut {
+            sequence: "Esc"
+            enabled: senhaDialog.opened
+            onActivated: { senhaInput.clear(); viewModel.pularSenha() }
+        }
+    }
+
+    Connections {
+        target: viewModel
+        function onSenhaChanged() {
+            if (viewModel.senhaPendente) {
+                if (senhaDialog.arquivoAtual !== viewModel.senhaArquivo) {
+                    senhaDialog.arquivoAtual = viewModel.senhaArquivo
+                    senhaInput.clear()
+                }
+                if (!senhaDialog.opened)
+                    senhaDialog.open()
+            } else {
+                senhaDialog.arquivoAtual = ""
+                senhaDialog.close()
+            }
+        }
+        function onNotificacao(mensagem) {
+            root.mostrarToast(mensagem)
+        }
+    }
+
     Dialog {
         id: configDialog
         modal: true
@@ -692,6 +807,7 @@ ApplicationWindow {
                         required property string beneficiarioDoc
                         required property string situacao
                         required property string beneficiarioDetalhe
+                        required property bool protegido
 
                         readonly property bool situacaoAlerta:
                             situacao.length > 0 && situacao.toUpperCase() !== "ATIVA"
@@ -719,7 +835,8 @@ ApplicationWindow {
                             StatusPill { status: linhaItem.status; Layout.preferredWidth: 92 }
                             ThemedText {
                                 Layout.preferredWidth: 160
-                                text: linhaItem.arquivo + (linhaItem.pagina > 0 ? "  · p." + linhaItem.pagina : "")
+                                text: (linhaItem.protegido ? "🔒 " : "") + linhaItem.arquivo
+                                    + (linhaItem.pagina > 0 ? "  · p." + linhaItem.pagina : "")
                             }
 
                             ColumnLayout {
@@ -757,12 +874,14 @@ ApplicationWindow {
                                 estilo: linhaItem.linha ? Theme.t.mono : Theme.t.subtitle
                             }
                             ThemedButton {
-                                text: "Copiar"
-                                secundario: true
+                                text: linhaItem.protegido ? "🔒 Senha" : "Copiar"
+                                secundario: !linhaItem.protegido
                                 Layout.preferredWidth: 90
                                 implicitHeight: 32
-                                enabled: linhaItem.linha.length > 0
-                                onClicked: viewModel.copiar(linhaItem.linha)
+                                enabled: linhaItem.protegido || linhaItem.linha.length > 0
+                                onClicked: linhaItem.protegido
+                                    ? viewModel.informarSenhaLinha(linhaItem.index)
+                                    : viewModel.copiar(linhaItem.linha)
                             }
                         }
 
@@ -819,7 +938,7 @@ ApplicationWindow {
         color: Theme.t.button.background
         opacity: 0
         visible: opacity > 0
-        z: 100
+        z: 200
         Behavior on opacity { NumberAnimation { duration: 200 } }
 
         Text {
@@ -832,12 +951,5 @@ ApplicationWindow {
         }
 
         Timer { id: toastTimer; interval: 2600; onTriggered: toast.opacity = 0 }
-    }
-
-    Connections {
-        target: viewModel
-        function onNotificacao(mensagem) {
-            root.mostrarToast(mensagem)
-        }
     }
 }

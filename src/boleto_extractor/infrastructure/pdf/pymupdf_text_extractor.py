@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import pymupdf
+from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
 
 
 class PyMuPdfTextExtractor:
@@ -10,7 +10,7 @@ class PyMuPdfTextExtractor:
         if arquivo.suffix.lower() != ".pdf":
             return ()
         try:
-            with pymupdf.open(arquivo) as doc:  # type: ignore[no-untyped-call]
+            with senhas_pdf.abrir(arquivo) as doc:
                 return tuple(str(p.get_text()) for p in doc)
         except Exception:
             return ()

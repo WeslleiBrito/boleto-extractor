@@ -8,6 +8,7 @@ from boleto_extractor.application.use_cases.extract_boleto import ExtractBoletoU
 from boleto_extractor.core.config import settings
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
+from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
 from boleto_extractor.presentation.formatting import (
     formatar_linha,
     formatar_valor,
@@ -26,11 +27,13 @@ _CABECALHO = [
     "Situação cadastral", "Município", "UF", "E-mail", "Telefone",
     "CNAE principal", "Porte", "Opção Simples", "Opção MEI",
 ]
+_MAX_TENTATIVAS = 3
 
 
 class MainViewModel(QObject):
     estadoChanged = Signal()
     notificacao = Signal(str)
+    senhaChanged = Signal()
 
     def __init__(self, use_case: ExtractBoletoUseCase, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -42,6 +45,11 @@ class MainViewModel(QObject):
         self._proximo_id = 0
         self._total = 0
         self._concluidos = 0
+        # Fila de PDFs protegidos aguardando senha
+        self._fila_senha: list[tuple[int, Path]] = []
+        self._tentativas = 0
+        self._erro_senha = ""
+        self._atendidos = 0  # para "Arquivo X de Y"
 
     @Property(QObject, constant=True)
     def resultados(self) -> ResultListModel:
@@ -70,6 +78,30 @@ class MainViewModel(QObject):
     @Property(int, notify=estadoChanged)
     def quantidade(self) -> int:
         return self._model.rowCount()
+
+    # ---------------- Propriedades da janela de senha ----------------
+    @Property(bool, notify=senhaChanged)
+    def senhaPendente(self) -> bool:
+        return bool(self._fila_senha)
+
+    @Property(str, notify=senhaChanged)
+    def senhaArquivo(self) -> str:
+        return self._fila_senha[0][1].name if self._fila_senha else ""
+
+    @Property(str, notify=senhaChanged)
+    def senhaPosicao(self) -> str:
+        if not self._fila_senha:
+            return ""
+        total = self._atendidos + len(self._fila_senha)
+        return f"Arquivo {self._atendidos + 1} de {total}"
+
+    @Property(int, notify=senhaChanged)
+    def senhaRestantes(self) -> int:
+        return len(self._fila_senha)
+
+    @Property(str, notify=senhaChanged)
+    def senhaErro(self) -> str:
+        return self._erro_senha
 
     def _novo_id(self) -> int:
         job_id = self._proximo_id
@@ -110,14 +142,17 @@ class MainViewModel(QObject):
         for arquivo in arquivos:
             job_id = self._novo_id()
             self._model.adicionar(job_id, arquivo)
-
-            worker = ExtractionWorker(job_id, arquivo, self._use_case)
-            worker.signals.concluido.connect(self._ao_concluir)
-            self._workers[job_id] = worker
-            self._total += 1
-            self._pool.start(worker)
+            self._iniciar(job_id, arquivo)
 
         self.estadoChanged.emit()
+
+    def _iniciar(self, job_id: int, arquivo: Path) -> None:
+        worker = ExtractionWorker(job_id, arquivo, self._use_case)
+        worker.signals.concluido.connect(self._ao_concluir)
+        worker.signals.protegido.connect(self._ao_protegido)
+        self._workers[job_id] = worker
+        self._total += 1
+        self._pool.start(worker)
 
     def _expandir(self, urls: list[object]) -> list[Path]:
         extensoes = set(settings.supported_extensions)
@@ -136,17 +171,102 @@ class MainViewModel(QObject):
 
         return arquivos
 
+    def _contar_concluido(self) -> None:
+        self._concluidos += 1
+        if self._concluidos >= self._total:
+            self._total = self._concluidos = 0
+            self.notificacao.emit("Processamento concluído.")
+        self.estadoChanged.emit()
+
     @Slot(int, object)
     def _ao_concluir(self, job_id: int, resultados: tuple[ExtractionResult, ...]) -> None:
         self._workers.pop(job_id, None)
         self._model.atualizar(job_id, resultados)
-        self._concluidos += 1
+        self._contar_concluido()
 
-        if self._concluidos >= self._total:
-            self._total = self._concluidos = 0
-            self.notificacao.emit("Processamento concluído.")
+    @Slot(int, str)
+    def _ao_protegido(self, job_id: int, caminho: str) -> None:
+        self._workers.pop(job_id, None)
+        self._model.marcar_protegido(job_id)
+        if all(j != job_id for j, _ in self._fila_senha):
+            self._fila_senha.append((job_id, Path(caminho)))
+            self.senhaChanged.emit()
+        self._contar_concluido()
 
+    # ---------------- Fila de senha ----------------
+    def _reprocessar(self, job_id: int, arquivo: Path) -> None:
+        self._model.reabrir(job_id)
+        self._iniciar(job_id, arquivo)
         self.estadoChanged.emit()
+
+    def _avancar(self) -> None:
+        self._fila_senha.pop(0)
+        self._atendidos += 1
+        self._tentativas = 0
+        self._erro_senha = ""
+        if not self._fila_senha:
+            self._atendidos = 0
+        self.senhaChanged.emit()
+
+    @Slot(str, bool, bool, result=bool)
+    def informarSenha(self, senha: str, usar_nos_proximos: bool, lembrar: bool) -> bool:
+        if not self._fila_senha:
+            return False
+        job_id, arquivo = self._fila_senha[0]
+
+        if not senhas_pdf.informar(arquivo, senha, usar_nos_proximos, lembrar):
+            self._tentativas += 1
+            if self._tentativas >= _MAX_TENTATIVAS:
+                self.notificacao.emit(f"🔒 {arquivo.name}: tentativas esgotadas. Arquivo pulado.")
+                self._avancar()
+            else:
+                self._erro_senha = f"Senha incorreta ({self._tentativas}/{_MAX_TENTATIVAS})."
+                self.senhaChanged.emit()
+            return False
+
+        self._avancar()
+        self._reprocessar(job_id, arquivo)
+        abertos = 1
+
+        # A mesma senha pode abrir os próximos arquivos do mesmo emissor
+        if usar_nos_proximos:
+            for item in list(self._fila_senha):
+                if not senhas_pdf.precisa_senha(item[1]):
+                    self._fila_senha.remove(item)
+                    self._atendidos += 1
+                    self._reprocessar(*item)
+                    abertos += 1
+            if not self._fila_senha:
+                self._atendidos = 0
+            self.senhaChanged.emit()
+
+        self.notificacao.emit(f"🔓 {abertos} arquivo(s) desbloqueado(s)")
+        return True
+
+    @Slot()
+    def pularSenha(self) -> None:
+        if self._fila_senha:
+            self._avancar()
+
+    @Slot()
+    def pularTodasSenhas(self) -> None:
+        self._fila_senha.clear()
+        self._atendidos = 0
+        self._tentativas = 0
+        self._erro_senha = ""
+        self.senhaChanged.emit()
+
+    @Slot(int)
+    def informarSenhaLinha(self, linha: int) -> None:
+        """Chamado pelo botão 🔒 da tabela, para tentar de novo um arquivo pulado."""
+        item = self._model.item(linha)
+        if item is None or not item.protegido:
+            return
+        self._fila_senha = [(j, a) for j, a in self._fila_senha if j != item.job_id]
+        self._fila_senha.insert(0, (item.job_id, item.caminho))
+        self._tentativas = 0
+        self._erro_senha = ""
+        self.senhaChanged.emit()
 
     # ---------------- Ações ----------------
     @Slot(str)
@@ -186,4 +306,5 @@ class MainViewModel(QObject):
     def limpar(self) -> None:
         if not self.processando:
             self._model.limpar()
+            self.pularTodasSenhas()
             self.estadoChanged.emit()

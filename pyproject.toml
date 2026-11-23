@@ -17,12 +17,24 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3",
-    "pytest-cov>=6.0",
-    "mypy>=1.14",
-    "ruff>=0.9",
-    "pyinstaller>=6.11",
+    "pytest>=9.2",
+    "pytest-cov>=7.1",
+    "pytest-qt>=4.4",
+    "pytest-mock>=3.14",
+    "mypy>=2.4",
+    "ruff>=0.17",
+    "pre-commit>=4.0",
+    "pyinstaller>=6.22",
+    "types-PyYAML",
+    "types-requests",
+    "types-python-dateutil",
+    "pymysql>=1.2.4",
+    "keyring",
+    "types-PyMySQL",
+    "types-tabulate",
+    "pandas-stubs",
 ]
+
 
 [project.scripts]
 boleto-extractor = "boleto_extractor.bootstrap:run"
