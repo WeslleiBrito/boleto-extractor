@@ -12,6 +12,7 @@ from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import ZXingBa
 from boleto_extractor.infrastructure.cnpj.bigquery_cnpj_client import BigQueryCnpjClient
 from boleto_extractor.infrastructure.cnpj.fallback_cnpj_lookup import FallbackCnpjLookup
 from boleto_extractor.infrastructure.cnpj.opencnpj_client import OpenCnpjClient
+from boleto_extractor.infrastructure.erp.erp_escrita_repository import ErpEscritaRepository
 from boleto_extractor.infrastructure.erp.erp_parcela_repository import ErpParcelaRepository
 from boleto_extractor.infrastructure.pdf.local_document_loader import LocalDocumentLoader
 from boleto_extractor.infrastructure.pdf.pymupdf_text_extractor import PyMuPdfTextExtractor
@@ -50,11 +51,15 @@ class DesktopApplication:
             self._settings.senha_mysql,
         )
 
+        # Escrita: grava SOMENTE pagar_parcelas.pagparc_obs, usando a mesma conexão configurada
+        escrita = ErpEscritaRepository(repositorio.conectar)
+
         self._theme = ThemeManager(self._application)
         self._viewmodel = MainViewModel(
             use_case,
             repositorio=repositorio,
             erp_ativo=lambda: bool(self._settings.dbAtivo),
+            escrita=escrita,
         )
 
         # Qualquer mudança nas configurações atualiza o estado do ERP na tela
@@ -73,4 +78,8 @@ class DesktopApplication:
         if not self._engine.rootObjects():
             return 1
 
-        return self._application.exec()
+        codigo = self._application.exec()
+
+        # Destrói o QML antes dos view models (evita avisos "null" ao fechar)
+        del self._engine
+        return codigo

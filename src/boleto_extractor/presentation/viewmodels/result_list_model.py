@@ -39,6 +39,7 @@ _CAMPOS = (
     # Sincronização com o ERP
     "elegivel", "documentoErp", "vencimentoTexto", "vencimentoIso", "vencimentoEditavel",
     "erroDocumento", "erroData", "statusErp", "statusErpTexto", "parcelaErp", "detalheErp",
+    "beneficiarioErp", "conferenciaCnpj",
 )
 _BASE = Qt.ItemDataRole.UserRole.value + 1
 _VAZIA = DadosEmpresa()
@@ -68,6 +69,9 @@ class LinhaResultado:
     erro_documento: bool = False
     erro_data: bool = False
     sincronizacao: ResultadoSincronizacao | None = None
+    # ---- Beneficiário vindo do fornecedor do ERP ----
+    beneficiario_erp: bool = False
+    fornecedor_erp_cod: int = 0
 
     @property
     def empresa(self) -> DadosEmpresa:
@@ -115,7 +119,9 @@ class LinhaResultado:
             ("MEI", e.opcao_mei),
         )
         linhas = [f"{k}: {v}" for k, v in pares if v]
-        if b.confirmado_pelo_codigo:
+        if self.beneficiario_erp:
+            linhas.append(f"🔗 Origem ERP: fornecedor #{self.fornecedor_erp_cod}")
+        elif b.confirmado_pelo_codigo:
             linhas.append("✔ CNPJ confirmado pelo código de barras")
         if b.tipo == "CNPJ" and b.empresa is None:
             linhas.append("Dados da empresa indisponíveis no momento")
@@ -175,6 +181,8 @@ class ResultListModel(QAbstractListModel):
             "statusErpTexto": ROTULOS[s.status] if s else "",
             "parcelaErp": s.parcela.rotulo if s and s.parcela else "",
             "detalheErp": s.detalhe if s else "",
+            "beneficiarioErp": item.beneficiario_erp,
+            "conferenciaCnpj": s.conferencia_cnpj if s else "",
         }
         return valores[campo]
 
@@ -254,6 +262,8 @@ class ResultListModel(QAbstractListModel):
         item.pagina = resultado.pagina
         item.mensagem = " | ".join(resultado.mensagens)
         item.beneficiario = resultado.beneficiario
+        item.beneficiario_erp = False
+        item.fornecedor_erp_cod = 0
         item.protegido = False
         item.sincronizacao = None  # documento_erp e data manual são preservados
 
@@ -285,6 +295,11 @@ class ResultListModel(QAbstractListModel):
             return
         for nome, valor in campos.items():
             setattr(item, nome, valor)
+        # Sincronização desfeita: o beneficiário que veio do ERP deixa de valer
+        if "sincronizacao" in campos and campos["sincronizacao"] is None and item.beneficiario_erp:
+            item.beneficiario = None
+            item.beneficiario_erp = False
+            item.fornecedor_erp_cod = 0
         self._notificar(linha)
 
     def aplicar_sincronizacao(self, por_chave: dict[str, ResultadoSincronizacao]) -> None:

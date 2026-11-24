@@ -4,18 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boleto-extractor"
-version = "0.1.0"
+version = "1.0.0"
 description = "Extrator independente de códigos de boletos bancários"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pyside6>=6.8",
+    "pyside6-essentials>=6.8",
     "pydantic>=2.10",
     "pymupdf>=1.25",
     "opencv-python-headless>=4.10",
     "zxing-cpp>=2.2",
+    "pymysql>=1.2.4",
+    "keyring>=25",
 ]
 
 [project.optional-dependencies]
+bigquery = [
+    "google-cloud-bigquery>=3.20",
+]
 dev = [
     "pytest>=9.2",
     "pytest-cov>=7.1",
@@ -28,13 +33,10 @@ dev = [
     "types-PyYAML",
     "types-requests",
     "types-python-dateutil",
-    "pymysql>=1.2.4",
-    "keyring",
     "types-PyMySQL",
     "types-tabulate",
     "pandas-stubs",
 ]
-
 
 [project.scripts]
 boleto-extractor = "boleto_extractor.bootstrap:run"
@@ -43,7 +45,12 @@ boleto-extractor = "boleto_extractor.bootstrap:run"
 where = ["src"]
 
 [tool.setuptools.package-data]
-boleto_extractor = ["presentation/qml/*.qml"]
+boleto_extractor = [
+    "presentation/qml/*.qml",
+    "presentation/qml/**/*.qml",
+    "presentation/qml/**/qmldir",
+    "presentation/qml/**/*.js",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

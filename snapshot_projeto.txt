@@ -29,6 +29,7 @@ requirements.txt
                 code_normalizer.py
                 documento_validator.py
                 matching_service.py
+                observacao_service.py
                 vencimento_service.py
                 __init__.py
                 extract_boleto.py
@@ -55,6 +56,7 @@ requirements.txt
                 fallback_cnpj_lookup.py
                 opencnpj_client.py
                 sqlite_cnpj_cache.py
+                erp_escrita_repository.py
                 erp_parcela_repository.py
                 __init__.py
                 image_processor.py
@@ -1008,7 +1010,8 @@ ARQUIVO: src/boleto_extractor/application/services/matching_service.py
 ================================================================================
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from enum import Enum
@@ -1018,7 +1021,7 @@ from boleto_extractor.infrastructure.erp.erp_parcela_repository import ParcelaEr
 _TOL = Decimal("0.01")
 
 
-class StatusCruzamento(str, Enum):
+class StatusSincronizacao(str, Enum):
     ENCONTRADO = "encontrado"
     JA_PAGO = "ja_pago"
     DATA_DIVERGENTE = "data_divergente"
@@ -1029,30 +1032,92 @@ class StatusCruzamento(str, Enum):
 
 
 ROTULOS = {
-    StatusCruzamento.ENCONTRADO: "Encontrado",
-    StatusCruzamento.JA_PAGO: "Já pago",
-    StatusCruzamento.DATA_DIVERGENTE: "Data divergente",
-    StatusCruzamento.VALOR_DIVERGENTE: "Valor divergente",
-    StatusCruzamento.DOC_INEXISTENTE: "Doc. inexistente",
-    StatusCruzamento.NAO_ENCONTRADO: "Não encontrado",
-    StatusCruzamento.DUPLICADO: "Duplicado",
+    StatusSincronizacao.ENCONTRADO: "Encontrado",
+    StatusSincronizacao.JA_PAGO: "Já pago",
+    StatusSincronizacao.DATA_DIVERGENTE: "Data divergente",
+    StatusSincronizacao.VALOR_DIVERGENTE: "Valor divergente",
+    StatusSincronizacao.DOC_INEXISTENTE: "Documento inexistente",
+    StatusSincronizacao.NAO_ENCONTRADO: "Não encontrado",
+    StatusSincronizacao.DUPLICADO: "Duplicado",
+}
+
+# Conferência do CNPJ do boleto x fornecedor do ERP
+CNPJ_CONFERE = "confere"
+CNPJ_RAIZ = "raiz"
+CNPJ_DIVERGE = "diverge"
+CNPJ_SEM_FORNECEDOR = "sem_fornecedor"
+CNPJ_SEM_BOLETO = "sem_cnpj_boleto"
+CNPJ_ORIGEM_ERP = "origem_erp"
+
+ROTULOS_CNPJ = {
+    CNPJ_CONFERE: "✔ CNPJ confere",
+    CNPJ_RAIZ: "≈ Mesma raiz (filial/matriz)",
+    CNPJ_DIVERGE: "⚠ CNPJ diverge do boleto",
+    CNPJ_SEM_FORNECEDOR: "⚠ Parcela sem fornecedor",
+    CNPJ_SEM_BOLETO: "Boleto sem CNPJ para conferir",
+    CNPJ_ORIGEM_ERP: "🔗 Beneficiário preenchido pelo fornecedor do ERP",
 }
 
 
 @dataclass(frozen=True, slots=True)
-class ItemCruzamento:
-    chave: str          # identificador da linha (código de barras)
-    documento: int      # pag_cod
+class ItemSincronizacao:
+    chave: str          # identificador da linha
+    documento: int      # pagparc_documento / NF
     vencimento: date
     valor: Decimal
+    cnpj: str = ""      # CNPJ/CPF do beneficiário (dígitos)
 
 
 @dataclass(frozen=True, slots=True)
-class ResultadoCruzamento:
+class ResultadoSincronizacao:
     chave: str
-    status: StatusCruzamento
+    status: StatusSincronizacao
     parcela: ParcelaErp | None
     detalhe: str
+    conferencia_cnpj: str = ""
+
+
+def _so_digitos(v: str | None) -> str:
+    return re.sub(r"\D", "", v or "")
+
+
+def formatar_documento(doc: str) -> str:
+    d = _so_digitos(doc)
+    if len(d) == 14:
+        return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    if len(d) == 11:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+    return d
+
+
+def conferir_cnpj(cnpj_boleto: str, parcela: ParcelaErp | None) -> str:
+    if parcela is None:
+        return ""
+    if not parcela.tem_fornecedor:
+        return CNPJ_SEM_FORNECEDOR
+    a, b = _so_digitos(cnpj_boleto), _so_digitos(parcela.fornecedor_cnpj)
+    if not a:
+        return CNPJ_SEM_BOLETO
+    if a == b:
+        return CNPJ_CONFERE
+    if len(a) == 14 and len(b) == 14 and a[:8] == b[:8]:
+        return CNPJ_RAIZ
+    return CNPJ_DIVERGE
+
+
+def com_origem_erp(r: ResultadoSincronizacao) -> ResultadoSincronizacao:
+    """Troca a conferência por 'origem ERP' (beneficiário veio do próprio fornecedor)."""
+    antigo = ROTULOS_CNPJ.get(r.conferencia_cnpj, "")
+    linhas = [l for l in r.detalhe.split("\n") if not antigo or l != antigo]
+    linhas.append(ROTULOS_CNPJ[CNPJ_ORIGEM_ERP])
+    return replace(r, detalhe="\n".join(linhas), conferencia_cnpj=CNPJ_ORIGEM_ERP)
+
+
+def descrever_fornecedor(p: ParcelaErp | None) -> str:
+    if p is None or not p.tem_fornecedor:
+        return ""
+    cnpj = formatar_documento(p.fornecedor_cnpj)
+    return f"{p.fornecedor_cod} - {p.fornecedor_nome}" + (f" ({cnpj})" if cnpj else "")
 
 
 def _br(d: date | None) -> str:
@@ -1063,59 +1128,144 @@ def _moeda(v: Decimal) -> str:
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _pago(p: ParcelaErp) -> str:
+    return " (paga)" if p.pago else ""
+
+
 def _valor_confere(p: ParcelaErp, valor: Decimal) -> bool:
     return abs(p.valor_documento - valor) <= _TOL or abs(p.saldo - valor) <= _TOL
 
 
-def cruzar(itens: list[ItemCruzamento],
-           parcelas_por_conta: dict[int, list[ParcelaErp]]) -> list[ResultadoCruzamento]:
+def _abertas_primeiro(parcelas: list[ParcelaErp]) -> list[ParcelaErp]:
+    return sorted(parcelas, key=lambda p: p.pago)  # estável: mantém a ordem original
+
+
+def _com_fornecedor(it: ItemSincronizacao, status: StatusSincronizacao,
+                    p: ParcelaErp, texto: str) -> ResultadoSincronizacao:
+    conf = conferir_cnpj(it.cnpj, p)
+    partes = [texto]
+    forn = descrever_fornecedor(p)
+    if forn:
+        partes.append(f"Fornecedor: {forn}")
+    if conf:
+        partes.append(ROTULOS_CNPJ[conf])
+    return ResultadoSincronizacao(it.chave, status, p, "\n".join(partes), conf)
+
+
+def sincronizar(itens: list[ItemSincronizacao],
+                parcelas_por_documento: dict[int, list[ParcelaErp]]) -> list[ResultadoSincronizacao]:
     usadas: set[int] = set()
-    saida: list[ResultadoCruzamento] = []
+    saida: list[ResultadoSincronizacao] = []
 
     for it in itens:
-        parcelas = parcelas_por_conta.get(it.documento, [])
+        parcelas = parcelas_por_documento.get(it.documento, [])
         if not parcelas:
-            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.DOC_INEXISTENTE, None,
-                                             f"Documento {it.documento} não existe no ERP"))
+            saida.append(ResultadoSincronizacao(
+                it.chave, StatusSincronizacao.DOC_INEXISTENTE, None,
+                f"Documento {it.documento} não existe no ERP"))
             continue
 
         exatas = [p for p in parcelas if p.vencimento == it.vencimento and _valor_confere(p, it.valor)]
         livres = [p for p in exatas if p.cod not in usadas]
 
         if livres:
-            abertas = [p for p in livres if not p.pago]
-            escolhida = (abertas or livres)[0]
+            escolhida = _abertas_primeiro(livres)[0]
             usadas.add(escolhida.cod)
             if escolhida.pago:
-                saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.JA_PAGO, escolhida,
-                                                 "Parcela já baixada no ERP"))
+                saida.append(_com_fornecedor(
+                    it, StatusSincronizacao.JA_PAGO, escolhida, "Parcela já baixada no ERP"))
             else:
-                saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.ENCONTRADO, escolhida,
-                                                 f"Saldo {_moeda(escolhida.saldo)}"))
+                saida.append(_com_fornecedor(
+                    it, StatusSincronizacao.ENCONTRADO, escolhida, f"Saldo {_moeda(escolhida.saldo)}"))
             continue
 
         if exatas:
-            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.DUPLICADO, exatas[0],
-                                             "Parcela já usada por outro boleto do lote"))
+            saida.append(_com_fornecedor(
+                it, StatusSincronizacao.DUPLICADO, exatas[0], "Parcela já usada por outro boleto do lote"))
             continue
 
-        mesmo_valor = [p for p in parcelas if _valor_confere(p, it.valor) and not p.pago]
+        mesmo_valor = _abertas_primeiro([p for p in parcelas if _valor_confere(p, it.valor)])
         if mesmo_valor:
-            datas = ", ".join(_br(p.vencimento) for p in mesmo_valor[:6])
-            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.DATA_DIVERGENTE, None,
-                                             f"Vencimentos com esse valor: {datas}"))
+            datas = ", ".join(f"{_br(p.vencimento)}{_pago(p)}" for p in mesmo_valor[:6])
+            saida.append(ResultadoSincronizacao(
+                it.chave, StatusSincronizacao.DATA_DIVERGENTE, None,
+                f"Vencimentos com esse valor: {datas}"))
             continue
 
-        mesma_data = [p for p in parcelas if p.vencimento == it.vencimento]
+        mesma_data = _abertas_primeiro([p for p in parcelas if p.vencimento == it.vencimento])
         if mesma_data:
-            valores = ", ".join(_moeda(p.valor_documento) for p in mesma_data[:4])
-            saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.VALOR_DIVERGENTE, None,
-                                             f"Valor no ERP: {valores}"))
+            valores = ", ".join(f"{_moeda(p.valor_documento)}{_pago(p)}" for p in mesma_data[:4])
+            saida.append(ResultadoSincronizacao(
+                it.chave, StatusSincronizacao.VALOR_DIVERGENTE, None,
+                f"Valor no ERP: {valores}"))
             continue
 
-        saida.append(ResultadoCruzamento(it.chave, StatusCruzamento.NAO_ENCONTRADO, None,
-                                         f"{len(parcelas)} parcela(s) no documento, nenhuma confere"))
+        saida.append(ResultadoSincronizacao(
+            it.chave, StatusSincronizacao.NAO_ENCONTRADO, None,
+            f"{len(parcelas)} parcela(s) no documento, nenhuma confere"))
     return saida
+
+
+================================================================================
+ARQUIVO: src/boleto_extractor/application/services/observacao_service.py
+================================================================================
+# observacao_service.py
+"""Monta o bloco de observação a partir dos dados do boleto e grava em lote."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Iterable, Optional
+
+from erp_escrita_repository import ErpEscritaRepository, so_digitos
+
+def _fmt_cnpj(c: str) -> str:
+    c = so_digitos(c)
+    return f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}" if len(c) == 14 else c
+
+
+def _fmt_valor(v) -> str:
+    try:
+        return f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (TypeError, ValueError):
+        return str(v or "")
+
+
+def montar_bloco(boleto: dict) -> str:
+    linhas = [f"Sincronizado em: {datetime.now():%d/%m/%Y %H:%M}"]
+    campos = [
+        ("Banco", boleto.get("banco")),
+        ("Linha digitável", boleto.get("linha_digitavel")),
+        ("Nosso número", boleto.get("nosso_numero")),
+        ("Documento", boleto.get("documento")),
+        ("Vencimento", boleto.get("vencimento")),
+        ("Valor", _fmt_valor(boleto.get("valor")) if boleto.get("valor") is not None else None),
+        ("Beneficiário", boleto.get("beneficiario_nome")),
+        ("CNPJ beneficiário", _fmt_cnpj(boleto.get("beneficiario_cnpj") or "") or None),
+        ("Arquivo", boleto.get("arquivo")),
+    ]
+    linhas += [f"{k}: {v}" for k, v in campos if v]
+    return "\n".join(linhas)
+
+
+class ObservacaoService:
+    def __init__(self, repo: ErpEscritaRepository):
+        self._repo = repo
+
+    def gravar(self, pagparc_cod: int, boleto: dict) -> dict:
+        return self._repo.gravar_parcela(
+            pagparc_cod=pagparc_cod,
+            bloco_obs=montar_bloco(boleto),
+            cnpj_beneficiario=boleto.get("beneficiario_cnpj"),
+        )
+
+    def gravar_lote(self, pares: Iterable[tuple[int, dict]], progresso: Optional[callable] = None) -> list[dict]:
+        pares = list(pares)
+        resultados = []
+        for i, (cod, boleto) in enumerate(pares, 1):
+            resultados.append(self.gravar(cod, boleto))
+            if progresso:
+                progresso(i, len(pares))
+        return resultados
 
 
 ================================================================================
@@ -2278,10 +2428,148 @@ class SqliteCnpjCache:
 
 
 ================================================================================
+ARQUIVO: src/boleto_extractor/infrastructure/erp/erp_escrita_repository.py
+================================================================================
+# boleto_extractor/infrastructure/erp/erp_escrita_repository.py
+"""
+Escrita no ERP restrita a pagar_parcelas.pagparc_obs.
+Fornecedor ausente é apenas LOCALIZADO (por CNPJ) e registrado no texto da observação.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
+
+MARCA_INI = "[SYNC-BOLETO]"
+MARCA_FIM = "[/SYNC-BOLETO]"
+_RE_BLOCO = re.compile(re.escape(MARCA_INI) + r".*?" + re.escape(MARCA_FIM) + r"\n?", re.DOTALL)
+_CNPJ_SQL = (
+    "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(f.forn_cnpj,''),'.',''),'/',''),'-',''),' ','')"
+)
+
+
+def so_digitos(valor: str | None) -> str:
+    return re.sub(r"\D", "", valor or "")
+
+
+def _latin1(texto: str) -> str:
+    return texto.encode("latin-1", errors="replace").decode("latin-1")
+
+
+@dataclass(frozen=True, slots=True)
+class Fornecedor:
+    codigo: int
+    nome: str
+    criterio: str  # "CNPJ exato" | "mesma raiz de CNPJ"
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoObservacao:
+    pagparc_cod: int
+    ok: bool
+    fornecedor: Fornecedor | None = None
+    fornecedor_ausente: bool = False
+    erro: str = ""
+
+
+class ErpEscritaRepository:
+    def __init__(self, conexao_factory: Callable[[], object]) -> None:
+        """conexao_factory: retorna conexão DB-API (pymysql / mysql-connector, paramstyle %s)."""
+        self._factory = conexao_factory
+        self._cache: dict[str, Fornecedor | None] = {}
+
+    # ---------------- Fornecedor (somente leitura) ----------------
+    def _buscar_fornecedor(self, cur, cnpj: str) -> Fornecedor | None:
+        cnpj = so_digitos(cnpj)
+        if len(cnpj) != 14:
+            return None
+        if cnpj in self._cache:
+            return self._cache[cnpj]
+
+        cur.execute(
+            f"""SELECT f.forn_cod, f.forn_nome FROM fornecedor f
+                 WHERE {_CNPJ_SQL} = %s
+                 ORDER BY (f.forn_ativo = 'S') DESC, f.forn_cod LIMIT 1""",
+            (cnpj,),
+        )
+        row = cur.fetchone()
+        forn = Fornecedor(int(row[0]), row[1] or "", "CNPJ exato") if row else None
+
+        if forn is None:
+            cur.execute(
+                f"""SELECT f.forn_cod, f.forn_nome FROM fornecedor f
+                     WHERE LEFT({_CNPJ_SQL}, 8) = %s
+                     ORDER BY (f.forn_ativo = 'S') DESC,
+                              (SUBSTRING({_CNPJ_SQL}, 9, 4) = '0001') DESC,
+                              f.forn_cod LIMIT 1""",
+                (cnpj[:8],),
+            )
+            row = cur.fetchone()
+            forn = Fornecedor(int(row[0]), row[1] or "", "mesma raiz de CNPJ") if row else None
+
+        self._cache[cnpj] = forn
+        return forn
+
+    # ---------------- Observação ----------------
+    @staticmethod
+    def mesclar(obs_atual: str | None, bloco: str) -> str:
+        base = _RE_BLOCO.sub("", obs_atual or "").rstrip()
+        novo = f"{MARCA_INI}\n{bloco.strip()}\n{MARCA_FIM}"
+        return f"{base}\n{novo}" if base else novo
+
+    def gravar_observacao(self, pagparc_cod: int, bloco: str, cnpj: str | None) -> ResultadoObservacao:
+        conn = self._factory()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """SELECT pp.pagparc_obs, pp.pagparc_fornecedor, p.pag_fornecedor
+                     FROM pagar_parcelas pp
+                LEFT JOIN pagar p ON p.pag_cod = pp.pagparc_conta
+                    WHERE pp.pagparc_cod = %s
+                      FOR UPDATE""",
+                (pagparc_cod,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return ResultadoObservacao(pagparc_cod, False, erro="Parcela não encontrada")
+
+            obs_atual, forn_parc, forn_pagar = row
+            ausente = not forn_parc and not forn_pagar
+            forn = None
+            if ausente:
+                forn = self._buscar_fornecedor(cur, cnpj or "")
+                if forn:
+                    bloco += (f"\nFornecedor sugerido: {forn.codigo} - {forn.nome} "
+                              f"({forn.criterio}) — vincular manualmente")
+                elif so_digitos(cnpj):
+                    bloco += f"\nFornecedor NÃO cadastrado para o CNPJ {so_digitos(cnpj)}"
+
+            cur.execute(
+                "UPDATE pagar_parcelas SET pagparc_obs = %s WHERE pagparc_cod = %s",
+                (_latin1(self.mesclar(obs_atual, bloco)), pagparc_cod),
+            )
+            conn.commit()
+            return ResultadoObservacao(pagparc_cod, True, forn, ausente)
+        except Exception as exc:  # noqa: BLE001
+            conn.rollback()
+            log.exception("Falha ao gravar observação da parcela %s", pagparc_cod)
+            return ResultadoObservacao(pagparc_cod, False, erro=str(exc))
+        finally:
+            cur.close()
+            conn.close()
+
+
+================================================================================
 ARQUIVO: src/boleto_extractor/infrastructure/erp/erp_parcela_repository.py
 ================================================================================
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -2297,11 +2585,26 @@ _SALDO = (
     " - COALESCE(p.pagparc_vlrpago,0))"
 )
 
+_DOC = "CAST(TRIM(p.pagparc_documento) AS UNSIGNED)"
+# NF fica na tabela pagar; se vazia, cai para pagparc_nota
+_NF = (
+    "CAST(TRIM(COALESCE(NULLIF(TRIM(pg.pag_numnf), ''), NULLIF(TRIM(p.pagparc_nota), ''), '0'))"
+    " AS UNSIGNED)"
+)
+# Fornecedor da parcela; se vazio, o da conta (pagar)
+_FORN = "COALESCE(NULLIF(p.pagparc_fornecedor, 0), NULLIF(pg.pag_fornecedor, 0))"
+
+MODOS = ("documento", "nota", "auto")
+
+
+def _digitos(valor: Any) -> str:
+    return re.sub(r"\D", "", str(valor or ""))
+
 
 @dataclass(frozen=True, slots=True)
 class ParcelaErp:
     cod: int
-    conta: int
+    conta: int          # pagparc_conta (ligação com a tabela pagar)
     parcela: int
     qtd_parcelas: int
     vencimento: date | None
@@ -2310,20 +2613,30 @@ class ParcelaErp:
     pago: bool
     nome: str
     nota: str
+    documento: int = 0          # pagparc_documento
+    fornecedor_cod: int = 0
+    fornecedor_nome: str = ""
+    fornecedor_cnpj: str = ""   # somente dígitos
 
     @property
     def rotulo(self) -> str:
         return f"Parc. {self.parcela}/{self.qtd_parcelas or '?'} (#{self.cod})"
 
+    @property
+    def tem_fornecedor(self) -> bool:
+        return self.fornecedor_cod > 0
+
 
 class ErpParcelaRepository:
-    """Somente leitura no ERP."""
+    """Leitura no ERP. Busca por pagparc_documento ou pelo número da NF (pagar).
+    Também fornece conexões (conectar) para o repositório de escrita."""
 
     def __init__(self, config: Callable[[], dict[str, Any]], senha: Callable[[], str]) -> None:
         self._config = config
         self._senha = senha
 
-    def _conectar(self):
+    def conectar(self):
+        """Abre uma conexão NOVA a cada chamada (autocommit desligado)."""
         import pymysql
 
         cfg = self._config()
@@ -2331,39 +2644,69 @@ class ErpParcelaRepository:
             host=cfg["db_host"], port=int(cfg["db_porta"]), user=cfg["db_usuario"],
             password=self._senha(), database=cfg["db_banco"] or None,
             charset="latin1", ssl={"ssl": {}} if cfg.get("db_ssl") else None,
-            connect_timeout=5, read_timeout=30,
+            connect_timeout=5, read_timeout=30, write_timeout=30,
+            autocommit=False,
         )
 
-    def parcelas_das_contas(self, contas: Iterable[int]) -> dict[int, list[ParcelaErp]]:
-        contas = sorted({int(c) for c in contas})
-        resultado: dict[int, list[ParcelaErp]] = defaultdict(list)
-        if not contas:
-            return {}
+    # Compatibilidade com chamadas antigas
+    _conectar = conectar
 
-        marcas = ",".join(["%s"] * len(contas))
+    @staticmethod
+    def _normalizar(chaves: Iterable[Any]) -> list[int]:
+        saida: set[int] = set()
+        for c in chaves:
+            try:
+                n = int(str(c).strip())
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                saida.add(n)
+        return sorted(saida)
+
+    def parcelas_por_chaves(self, chaves: Iterable[Any], modo: str = "documento") -> dict[int, list[ParcelaErp]]:
+        """Retorna {chave: [parcelas]}. modo = 'documento' ou 'nota'."""
+        valores = self._normalizar(chaves)
+        if not valores:
+            return {}
+        expr = _NF if modo == "nota" else _DOC
+
+        resultado: dict[int, list[ParcelaErp]] = defaultdict(list)
+        marcas = ",".join(["%s"] * len(valores))
         sql = f"""
             SELECT p.pagparc_cod, p.pagparc_conta, p.pagparc_parcela, pg.pag_qtdparcelas,
                    p.pagparc_dtvencimento, p.pagparc_vlrdocumento, {_SALDO},
                    p.pagparc_dtpagamento, COALESCE(p.pagparc_nome, ''),
-                   COALESCE(NULLIF(p.pagparc_nota, ''), pg.pag_numnf, '')
+                   COALESCE(NULLIF(TRIM(pg.pag_numnf), ''), p.pagparc_nota, ''),
+                   {_DOC}, {expr},
+                   f.forn_cod, COALESCE(f.forn_nome, ''), COALESCE(f.forn_cnpj, '')
               FROM pagar_parcelas p
-              JOIN pagar pg ON pg.pag_cod = p.pagparc_conta
-             WHERE p.pagparc_conta IN ({marcas})
-          ORDER BY p.pagparc_conta, p.pagparc_dtvencimento, p.pagparc_parcela
+         LEFT JOIN pagar pg ON pg.pag_cod = p.pagparc_conta
+         LEFT JOIN fornecedor f ON f.forn_cod = {_FORN}
+             WHERE {expr} IN ({marcas})
+          ORDER BY {expr}, p.pagparc_dtvencimento, p.pagparc_parcela
         """
-        with self._conectar() as con, con.cursor() as cur:
-            cur.execute(sql, contas)
+        with self.conectar() as con, con.cursor() as cur:
+            cur.execute(sql, valores)
             for r in cur.fetchall():
                 saldo = Decimal(str(r[6] or 0)).quantize(_DOIS)
-                resultado[r[1]].append(ParcelaErp(
-                    cod=r[0], conta=r[1], parcela=r[2] or 0, qtd_parcelas=r[3] or 0,
+                chave = int(r[11] or 0)
+                resultado[chave].append(ParcelaErp(
+                    cod=r[0], conta=int(r[1] or 0), parcela=r[2] or 0, qtd_parcelas=r[3] or 0,
                     vencimento=r[4] if isinstance(r[4], date) else None,
                     valor_documento=Decimal(str(r[5] or 0)).quantize(_DOIS),
                     saldo=saldo,
                     pago=r[7] is not None or saldo <= Decimal("0.009"),
-                    nome=(r[8] or "").strip(), nota=(r[9] or "").strip(),
+                    nome=(r[8] or "").strip(), nota=str(r[9] or "").strip(),
+                    documento=int(r[10] or 0),
+                    fornecedor_cod=int(r[12] or 0),
+                    fornecedor_nome=(r[13] or "").strip(),
+                    fornecedor_cnpj=_digitos(r[14]),
                 ))
         return dict(resultado)
+
+    # Compatibilidade com chamadas antigas
+    def parcelas_dos_documentos(self, documentos: Iterable[Any]) -> dict[int, list[ParcelaErp]]:
+        return self.parcelas_por_chaves(documentos, "documento")
 
 
 ================================================================================
@@ -2741,6 +3084,8 @@ from boleto_extractor.infrastructure.barcode.zxing_barcode_reader import ZXingBa
 from boleto_extractor.infrastructure.cnpj.bigquery_cnpj_client import BigQueryCnpjClient
 from boleto_extractor.infrastructure.cnpj.fallback_cnpj_lookup import FallbackCnpjLookup
 from boleto_extractor.infrastructure.cnpj.opencnpj_client import OpenCnpjClient
+from boleto_extractor.infrastructure.erp.erp_escrita_repository import ErpEscritaRepository
+from boleto_extractor.infrastructure.erp.erp_parcela_repository import ErpParcelaRepository
 from boleto_extractor.infrastructure.pdf.local_document_loader import LocalDocumentLoader
 from boleto_extractor.infrastructure.pdf.pymupdf_text_extractor import PyMuPdfTextExtractor
 from boleto_extractor.presentation.themes.theme_manager import ThemeManager
@@ -2771,8 +3116,26 @@ class DesktopApplication:
             text_extractor=PyMuPdfTextExtractor(),
             cnpj_lookup=cnpj_lookup,
         )
+
+        # Repositório ERP: config e senha (tela ou cofre do Windows) lidas a cada conexão
+        repositorio = ErpParcelaRepository(
+            self._settings.valores,
+            self._settings.senha_mysql,
+        )
+
+        # Escrita: grava SOMENTE pagar_parcelas.pagparc_obs, usando a mesma conexão configurada
+        escrita = ErpEscritaRepository(repositorio.conectar)
+
         self._theme = ThemeManager(self._application)
-        self._viewmodel = MainViewModel(use_case)
+        self._viewmodel = MainViewModel(
+            use_case,
+            repositorio=repositorio,
+            erp_ativo=lambda: bool(self._settings.dbAtivo),
+            escrita=escrita,
+        )
+
+        # Qualquer mudança nas configurações atualiza o estado do ERP na tela
+        self._settings.alterado.connect(self._viewmodel.atualizarErp)
 
         contexto = self._engine.rootContext()
         contexto.setContextProperty("Theme", self._theme)
@@ -2787,7 +3150,11 @@ class DesktopApplication:
         if not self._engine.rootObjects():
             return 1
 
-        return self._application.exec()
+        codigo = self._application.exec()
+
+        # Destrói o QML antes dos view models (evita avisos "null" ao fechar)
+        del self._engine
+        return codigo
 
 
 ================================================================================
@@ -2955,9 +3322,9 @@ import QtQuick.Dialogs
 
 ApplicationWindow {
     id: root
-    width: 1440
+    width: 1600
     height: 720
-    minimumWidth: 1100
+    minimumWidth: 1200
     minimumHeight: 500
     visible: true
     title: "Extrator de Boletos"
@@ -2968,9 +3335,23 @@ ApplicationWindow {
         review: "Revisar", error: "Erro"
     })
 
+    // Status do ERP -> cor do tema (mesmos valores de StatusSincronizacao)
+    readonly property var corErp: ({
+        encontrado: "success", ja_pago: "review", data_divergente: "review",
+        valor_divergente: "review", doc_inexistente: "invalid",
+        nao_encontrado: "invalid", duplicado: "error"
+    })
+
+    readonly property var modosBusca: [
+        { nome: "Documento", id: "documento" },
+        { nome: "Nota fiscal", id: "nota" },
+        { nome: "Automático (Doc → NF)", id: "auto" }
+    ]
+
     readonly property var colunas: [
-        { t: "STATUS", w: 92 }, { t: "ARQUIVO", w: 160 }, { t: "BENEFICIÁRIO", w: 230 },
-        { t: "EMISSOR", w: 130 }, { t: "VENCIMENTO", w: 100 }, { t: "VALOR", w: 110 },
+        { t: "STATUS", w: 92 }, { t: "ARQUIVO", w: 140 }, { t: "BENEFICIÁRIO", w: 200 },
+        { t: "EMISSOR", w: 110 }, { t: viewModel.rotuloChave.toUpperCase(), w: 100 },
+        { t: "VENCIMENTO", w: 140 }, { t: "VALOR", w: 100 }, { t: "ERP", w: 150 },
         { t: "LINHA DIGITÁVEL", w: -1 }, { t: "", w: 90 }
     ]
 
@@ -2985,6 +3366,16 @@ ApplicationWindow {
         toast.texto = mensagem
         toast.opacity = 1
         toastTimer.restart()
+    }
+
+    function aplicarDocumentoTodos() {
+        if (docTodosInput.text.trim().length === 0) {
+            docTodosInput.forceActiveFocus()
+            return
+        }
+        if (viewModel.aplicarDocumentoTodos(docTodosInput.text, sobrescreverCheck.checked) > 0)
+            docTodosInput.clear()
+        codigoInput.forceActiveFocus()
     }
 
     // Aceita CNPJ numérico ou alfanumérico (12 alfanuméricos + 2 dígitos verificadores)
@@ -3047,6 +3438,7 @@ ApplicationWindow {
 
     component ThemedInput: TextField {
         id: campo
+        property bool erro: false
         color: Theme.t.input.text
         placeholderTextColor: Theme.t.input.placeholder
         font.family: Theme.t.input.font.family
@@ -3057,14 +3449,59 @@ ApplicationWindow {
         background: Rectangle {
             implicitHeight: 38
             radius: Theme.t.input.radius
-            color: Theme.t.input.background
-            border.width: campo.activeFocus ? 2 : 1
-            border.color: campo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
+            color: campo.erro ? Qt.alpha(Theme.t.status.invalid, 0.10) : Theme.t.input.background
+            border.width: campo.activeFocus || campo.erro ? 2 : 1
+            border.color: campo.erro ? Theme.t.status.invalid
+                        : campo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
         }
+    }
+
+    component ThemedCombo: ComboBox {
+        id: combo
+        textRole: "nome"
+        valueRole: "id"
+        focusPolicy: Qt.NoFocus
+        contentItem: Text {
+            leftPadding: 12
+            text: combo.displayText
+            color: Theme.t.input.text
+            font.family: Theme.t.input.font.family
+            font.pixelSize: Theme.t.input.font.pixelSize
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        background: Rectangle {
+            implicitHeight: 38
+            radius: Theme.t.input.radius
+            color: Theme.t.input.background
+            border.color: combo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
+        }
+        delegate: ItemDelegate {
+            required property var modelData
+            required property int index
+            width: combo.width
+            highlighted: combo.highlightedIndex === index
+            contentItem: Text {
+                text: modelData.nome
+                color: Theme.t.body.color
+                font.family: Theme.t.body.font.family
+                font.pixelSize: Theme.t.body.font.pixelSize
+            }
+            background: Rectangle {
+                color: highlighted ? Theme.t.table.rowHover : Theme.t.surface
+            }
+        }
+        popup.background: Rectangle {
+            color: Theme.t.surface
+            border.color: Theme.t.border
+            radius: 8
+        }
+        opacity: enabled ? 1 : 0.45
     }
 
     component ThemedCheck: CheckBox {
         id: chk
+        focusPolicy: Qt.NoFocus
         contentItem: Text {
             text: chk.text
             leftPadding: chk.indicator.width + chk.spacing
@@ -3113,6 +3550,130 @@ ApplicationWindow {
             font.family: Theme.t.table.headerFont.family
             font.pixelSize: 12
             font.weight: 700
+        }
+    }
+
+    component ErpPill: Rectangle {
+        property string chave: ""
+        property string texto: ""
+        readonly property color cor: Theme.t.status[root.corErp[chave] || "pending"]
+        implicitWidth: rotulo.implicitWidth + 18
+        implicitHeight: 22
+        radius: 11
+        color: Qt.alpha(cor, 0.18)
+        border.color: cor
+        Text {
+            id: rotulo
+            anchors.centerIn: parent
+            text: parent.texto
+            color: parent.cor
+            font.family: Theme.t.table.headerFont.family
+            font.pixelSize: 11
+            font.weight: 700
+        }
+    }
+
+    // ---------- Calendário (compartilhado por todas as linhas) ----------
+    Popup {
+        id: calendario
+        property int linha: -1
+        property int mes: 0
+        property int ano: 2026
+        width: 300
+        padding: 12
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: codigoInput.forceActiveFocus()
+
+        function abrir(linha, iso, origem) {
+            const d = iso ? new Date(iso + "T12:00:00") : new Date()
+            calendario.linha = linha
+            calendario.mes = d.getMonth()
+            calendario.ano = d.getFullYear()
+            const p = origem.mapToItem(root.contentItem, 0, origem.height + 4)
+            calendario.x = Math.min(p.x, root.width - calendario.width - 10)
+            calendario.y = Math.min(p.y, root.height - 320)
+            calendario.open()
+        }
+        function mover(delta) {
+            let m = calendario.mes + delta
+            calendario.ano += Math.floor(m / 12)
+            calendario.mes = ((m % 12) + 12) % 12
+        }
+        function escolher(d) {
+            const dd = String(d.getDate()).padStart(2, "0")
+            const mm = String(d.getMonth() + 1).padStart(2, "0")
+            viewModel.definirVencimento(calendario.linha, dd + "/" + mm + "/" + d.getFullYear())
+            calendario.close()
+        }
+
+        background: Rectangle {
+            color: Theme.t.surface
+            radius: 10
+            border.color: Theme.t.accent
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 6
+
+            RowLayout {
+                Layout.fillWidth: true
+                ThemedButton { text: "‹"; secundario: true; implicitWidth: 36; implicitHeight: 30; onClicked: calendario.mover(-1) }
+                ThemedText {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    estilo: Theme.t.subtitle
+                    text: Qt.locale("pt_BR").standaloneMonthName(calendario.mes) + " " + calendario.ano
+                }
+                ThemedButton { text: "›"; secundario: true; implicitWidth: 36; implicitHeight: 30; onClicked: calendario.mover(1) }
+            }
+
+            DayOfWeekRow {
+                Layout.fillWidth: true
+                locale: Qt.locale("pt_BR")
+                delegate: Text {
+                    required property string shortName
+                    text: shortName
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.t.subtitle.color
+                    font.pixelSize: 11
+                }
+            }
+
+            MonthGrid {
+                id: grade
+                Layout.fillWidth: true
+                month: calendario.mes
+                year: calendario.ano
+                locale: Qt.locale("pt_BR")
+                onClicked: (d) => calendario.escolher(d)
+                delegate: Rectangle {
+                    required property var model
+                    implicitHeight: 30
+                    radius: 6
+                    readonly property bool hoje: model.today
+                    color: diaHover.hovered ? Qt.alpha(Theme.t.accent, 0.25) : "transparent"
+                    border.color: hoje ? Theme.t.accent : "transparent"
+                    HoverHandler { id: diaHover }
+                    Text {
+                        anchors.centerIn: parent
+                        text: parent.model.day
+                        color: Theme.t.body.color
+                        opacity: parent.model.month === calendario.mes ? 1 : 0.35
+                        font.pixelSize: 13
+                    }
+                }
+            }
+
+            ThemedButton {
+                Layout.fillWidth: true
+                text: "Limpar data"
+                secundario: true
+                implicitHeight: 30
+                onClicked: { viewModel.definirVencimento(calendario.linha, ""); calendario.close() }
+            }
         }
     }
 
@@ -3288,6 +3849,7 @@ ApplicationWindow {
         }
     }
 
+    // ---------- Configurações ----------
     Dialog {
         id: configDialog
         modal: true
@@ -3295,7 +3857,10 @@ ApplicationWindow {
         width: 600
         height: Math.min(root.height * 0.92, 660)
         padding: 24
-        onClosed: codigoInput.forceActiveFocus()
+        onClosed: {
+            viewModel.atualizarErp()
+            codigoInput.forceActiveFocus()
+        }
         background: Rectangle {
             color: Theme.t.surface
             radius: 12
@@ -3594,6 +4159,7 @@ ApplicationWindow {
                     text: "Salvar"
                     onClicked: {
                         if (settings.salvar()) {
+                            viewModel.atualizarErp()
                             configDialog.close()
                             root.mostrarToast("Configurações salvas")
                         }
@@ -3626,6 +4192,24 @@ ApplicationWindow {
 
             ThemedButton { text: "＋ Adicionar"; onClicked: abrirDialog.open() }
             ThemedButton {
+                text: viewModel.sincronizando ? "Sincronizando…" : "🔗 Sincronizar ERP"
+                implicitWidth: 170
+                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.sincronizando
+                onClicked: viewModel.sincronizar()
+                ToolTip.visible: hovered && !viewModel.erpConfigurado
+                ToolTip.text: "Ative o MySQL (ERP) nas configurações ⚙ e salve"
+            }
+            ThemedButton {
+    text: viewModel.salvandoObs ? "Salvando…"
+        : "📝 Salvar observações" + (viewModel.quantidadeObs > 0 ? " (" + viewModel.quantidadeObs + ")" : "")
+    implicitWidth: 210
+    enabled: viewModel.podeSalvarObs
+    onClicked: viewModel.salvarObservacoes()
+    ToolTip.visible: hovered && !enabled && !viewModel.salvandoObs
+    ToolTip.text: "Sincronize primeiro: só parcelas com status \"Encontrado\" recebem observação"
+}
+
+            ThemedButton {
                 text: "Exportar CSV"
                 secundario: true
                 enabled: viewModel.quantidade > 0 && !viewModel.processando
@@ -3634,7 +4218,7 @@ ApplicationWindow {
             ThemedButton {
                 text: "Limpar"
                 secundario: true
-                enabled: viewModel.quantidade > 0 && !viewModel.processando
+                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.sincronizando
                 onClicked: { viewModel.limpar(); codigoInput.forceActiveFocus() }
             }
             ThemedButton {
@@ -3681,6 +4265,61 @@ ApplicationWindow {
                 enabled: codigoInput.text.trim().length > 0
                 onClicked: codigoInput.enviar()
             }
+        }
+
+        // ---------- Modo de busca + número para todos os itens ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            visible: viewModel.quantidade > 0
+
+            ThemedText { text: "🔎 Buscar no ERP por:"; estilo: Theme.t.subtitle }
+
+            ThemedCombo {
+                id: modoCombo
+                Layout.preferredWidth: 210
+                model: root.modosBusca
+                enabled: !viewModel.sincronizando
+                Component.onCompleted: currentIndex = indexOfValue(viewModel.modoBusca)
+                onActivated: viewModel.definirModoBusca(currentValue)
+                Connections {
+                    target: viewModel
+                    function onModoBuscaChanged() {
+                        modoCombo.currentIndex = modoCombo.indexOfValue(viewModel.modoBusca)
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 26; color: Theme.t.border }
+
+            ThemedText { text: "📄 " + viewModel.rotuloChave + " para todos:"; estilo: Theme.t.subtitle }
+
+            ThemedInput {
+                id: docTodosInput
+                Layout.preferredWidth: 180
+                implicitHeight: 38
+                enabled: !viewModel.sincronizando
+                placeholderText: "Nº " + viewModel.rotuloChave
+                font.family: Theme.t.mono.font.family
+                maximumLength: 20
+                validator: RegularExpressionValidator { regularExpression: /[0-9]{0,20}/ }
+                onAccepted: root.aplicarDocumentoTodos()
+            }
+
+            ThemedCheck {
+                id: sobrescreverCheck
+                checked: false
+                enabled: !viewModel.sincronizando
+                text: "Sobrescrever preenchidos"
+            }
+
+            ThemedButton {
+                text: "Aplicar a todos"
+                enabled: docTodosInput.text.length > 0 && !viewModel.sincronizando
+                onClicked: root.aplicarDocumentoTodos()
+            }
+
+            Item { Layout.fillWidth: true }
         }
 
         Rectangle {
@@ -3741,6 +4380,7 @@ ApplicationWindow {
 
                     delegate: Rectangle {
                         id: linhaItem
+                        // Nomes idênticos aos de _CAMPOS em result_list_model.py
                         required property int index
                         required property string arquivo
                         required property string caminho
@@ -3758,9 +4398,25 @@ ApplicationWindow {
                         required property string situacao
                         required property string beneficiarioDetalhe
                         required property bool protegido
+                        // Sincronização com o ERP
+                        required property bool elegivel
+                        required property string documentoErp
+                        required property string vencimentoTexto
+                        required property string vencimentoIso
+                        required property bool vencimentoEditavel
+                        required property bool erroDocumento
+                        required property bool erroData
+                        required property string statusErp
+                        required property string statusErpTexto
+                        required property string parcelaErp
+                        required property string detalheErp
 
                         readonly property bool situacaoAlerta:
                             situacao.length > 0 && situacao.toUpperCase() !== "ATIVA"
+
+                        // Mantém os campos sincronizados com o modelo (ex.: "Aplicar a todos")
+                        onDocumentoErpChanged: if (!docInput.activeFocus) docInput.text = documentoErp
+                        onVencimentoTextoChanged: if (!dataInput.activeFocus) dataInput.text = vencimentoTexto
 
                         width: lista.width
                         height: 56
@@ -3769,11 +4425,14 @@ ApplicationWindow {
 
                         HoverHandler { id: hover }
 
-                        ToolTip.visible: hover.hovered
+                        ToolTip.visible: hover.hovered && !docInput.activeFocus && !dataInput.activeFocus
                         ToolTip.delay: 600
                         ToolTip.text: caminho
                             + (tipo ? "\nTipo: " + tipo : "")
                             + (beneficiarioDetalhe ? "\n\n" + beneficiarioDetalhe : "")
+                            + (statusErpTexto ? "\n\nERP: " + statusErpTexto
+                               + (parcelaErp ? " · " + parcelaErp : "")
+                               + (detalheErp ? "\n" + detalheErp : "") : "")
                             + (mensagem ? "\n\n" + mensagem : "")
 
                         RowLayout {
@@ -3784,14 +4443,14 @@ ApplicationWindow {
 
                             StatusPill { status: linhaItem.status; Layout.preferredWidth: 92 }
                             ThemedText {
-                                Layout.preferredWidth: 160
+                                Layout.preferredWidth: 140
                                 text: (linhaItem.protegido ? "🔒 " : "") + linhaItem.arquivo
                                     + (linhaItem.pagina > 0 ? "  · p." + linhaItem.pagina : "")
                             }
 
                             ColumnLayout {
-                                Layout.preferredWidth: 230
-                                Layout.maximumWidth: 230
+                                Layout.preferredWidth: 200
+                                Layout.maximumWidth: 200
                                 spacing: 1
                                 ThemedText {
                                     Layout.fillWidth: true
@@ -3811,13 +4470,110 @@ ApplicationWindow {
                                 }
                             }
 
-                            ThemedText { text: linhaItem.emissor || "—"; Layout.preferredWidth: 130 }
-                            ThemedText { text: linhaItem.vencimento || "—"; Layout.preferredWidth: 100 }
+                            ThemedText { text: linhaItem.emissor || "—"; Layout.preferredWidth: 110 }
+
+                            // ---- Documento / NF ----
+                            Item {
+                                Layout.preferredWidth: 100
+                                implicitHeight: 34
+                                ThemedInput {
+                                    id: docInput
+                                    anchors.fill: parent
+                                    visible: linhaItem.elegivel
+                                    enabled: !viewModel.sincronizando
+                                    erro: linhaItem.erroDocumento
+                                    text: linhaItem.documentoErp
+                                    placeholderText: viewModel.rotuloChave
+                                    font.family: Theme.t.mono.font.family
+                                    leftPadding: 8
+                                    maximumLength: 20
+                                    validator: RegularExpressionValidator { regularExpression: /[0-9]{0,20}/ }
+                                    // Grava a cada tecla: não depende de perder o foco
+                                    onTextEdited: viewModel.definirDocumento(linhaItem.index, text)
+                                    onEditingFinished: viewModel.definirDocumento(linhaItem.index, text)
+                                    onAccepted: dataInput.visible && !dataInput.readOnly
+                                        ? dataInput.forceActiveFocus() : codigoInput.forceActiveFocus()
+                                }
+                                ThemedText { anchors.verticalCenter: parent.verticalCenter; visible: !linhaItem.elegivel; text: "—" }
+                            }
+
+                            // ---- Vencimento (travado ou editável + calendário) ----
+                            RowLayout {
+                                Layout.preferredWidth: 140
+                                Layout.maximumWidth: 140
+                                spacing: 4
+                                ThemedInput {
+                                    id: dataInput
+                                    Layout.fillWidth: true
+                                    implicitHeight: 34
+                                    visible: linhaItem.elegivel
+                                    readOnly: !linhaItem.vencimentoEditavel
+                                    enabled: !viewModel.sincronizando
+                                    erro: linhaItem.erroData
+                                    text: linhaItem.vencimentoTexto
+                                    placeholderText: "dd/mm/aaaa"
+                                    font.family: Theme.t.mono.font.family
+                                    leftPadding: 8
+                                    maximumLength: 10
+                                    validator: RegularExpressionValidator { regularExpression: /[0-9\/]{0,10}/ }
+                                    // Insere as barras e grava quando a data estiver completa
+                                    onTextEdited: {
+                                        const d = text.replace(/\D/g, "").slice(0, 8)
+                                        let f = d
+                                        if (d.length > 4) f = d.slice(0, 2) + "/" + d.slice(2, 4) + "/" + d.slice(4)
+                                        else if (d.length > 2) f = d.slice(0, 2) + "/" + d.slice(2)
+                                        if (f !== text) text = f
+                                        if (!readOnly && (d.length === 8 || d.length === 0))
+                                            viewModel.definirVencimento(linhaItem.index, f)
+                                    }
+                                    onEditingFinished: if (!readOnly) {
+                                        viewModel.definirVencimento(linhaItem.index, text)
+                                        text = linhaItem.vencimentoTexto
+                                    }
+                                    onAccepted: codigoInput.forceActiveFocus()
+                                    ToolTip.visible: readOnly && hovered
+                                    ToolTip.text: "Vencimento lido do código de barras (bloqueado)"
+                                }
+                                ThemedButton {
+                                    visible: linhaItem.elegivel && linhaItem.vencimentoEditavel
+                                    enabled: !viewModel.sincronizando
+                                    text: "📅"
+                                    secundario: true
+                                    implicitWidth: 34
+                                    implicitHeight: 34
+                                    onClicked: calendario.abrir(linhaItem.index, linhaItem.vencimentoIso, this)
+                                }
+                                ThemedText {
+                                    visible: !linhaItem.elegivel
+                                    text: linhaItem.vencimento || "—"
+                                }
+                            }
+
                             ThemedText {
                                 text: linhaItem.valor || "—"
-                                Layout.preferredWidth: 110
+                                Layout.preferredWidth: 100
                                 estilo: linhaItem.valor ? Theme.t.mono : Theme.t.body
                             }
+
+                            // ---- Resultado do ERP ----
+                            ColumnLayout {
+                                Layout.preferredWidth: 150
+                                Layout.maximumWidth: 150
+                                spacing: 2
+                                ErpPill {
+                                    visible: linhaItem.statusErp.length > 0
+                                    chave: linhaItem.statusErp
+                                    texto: linhaItem.statusErpTexto
+                                }
+                                ThemedText {
+                                    Layout.fillWidth: true
+                                    estilo: Theme.t.subtitle
+                                    font.pixelSize: 11
+                                    text: linhaItem.statusErp ? (linhaItem.parcelaErp || linhaItem.detalheErp)
+                                                              : (linhaItem.elegivel ? "Não sincronizado" : "—")
+                                }
+                            }
+
                             ThemedText {
                                 Layout.fillWidth: true
                                 text: linhaItem.linhaFormatada || linhaItem.mensagem
@@ -4295,24 +5051,39 @@ ARQUIVO: src/boleto_extractor/presentation/viewmodels/main_viewmodel.py
 ================================================================================
 import csv
 import re
+from collections.abc import Callable
 from datetime import date, datetime
-from decimal import Decimal
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QRunnable, QSettings, QThreadPool, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
 from boleto_extractor.application.services.matching_service import (
-    ItemCruzamento,
+    CNPJ_DIVERGE,
+    CNPJ_SEM_FORNECEDOR,
     ROTULOS,
-    StatusCruzamento,
-    cruzar,
+    ROTULOS_CNPJ,
+    ItemSincronizacao,
+    ResultadoSincronizacao,
+    StatusSincronizacao,
+    com_origem_erp,
+    descrever_fornecedor,
+    formatar_documento,
+)
+from boleto_extractor.application.services.matching_service import (
+    sincronizar as executar_sincronizacao,
 )
 from boleto_extractor.application.use_cases.extract_boleto import ExtractBoletoUseCase
 from boleto_extractor.core.config import settings
+from boleto_extractor.domain.entities.beneficiario import Beneficiario, DadosEmpresa
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.extraction_status import ExtractionStatus
-from boleto_extractor.infrastructure.erp.erp_parcela_repository import ErpParcelaRepository
+from boleto_extractor.infrastructure.erp.erp_escrita_repository import (
+    ErpEscritaRepository,
+    ResultadoObservacao,
+    so_digitos,
+)
+from boleto_extractor.infrastructure.erp.erp_parcela_repository import MODOS, ErpParcelaRepository
 from boleto_extractor.infrastructure.pdf.pdf_senha import senhas_pdf
 from boleto_extractor.presentation.formatting import (
     formatar_linha,
@@ -4331,14 +5102,23 @@ _CABECALHO = [
     "Beneficiário documento", "Beneficiário tipo", "Razão social", "Nome fantasia",
     "Situação cadastral", "Município", "UF", "E-mail", "Telefone",
     "CNAE principal", "Porte", "Opção Simples", "Opção MEI",
-    "Documento (pag_cod)", "Status ERP", "Parcela ERP", "Detalhe ERP",
+    "Documento/NF ERP", "Status ERP", "Parcela ERP", "Detalhe ERP",
+    "Fornecedor ERP", "CNPJ fornecedor ERP", "Conferência CNPJ", "Origem beneficiário",
 ]
 _MAX_TENTATIVAS = 3
+_SEM_MATCH = {"nao_encontrado", "doc_inexistente"}
+_ROTULO_MODO = {"documento": "Documento", "nota": "NF", "auto": "Documento/NF"}
 
 
-# ---------------- Utilitários de data/valor ----------------
 def _parse_data(texto: str) -> date | None:
-    dig = re.sub(r"\D", "", texto or "")
+    """Aceita dd/mm/aaaa, ddmmaaaa ou ISO aaaa-mm-dd (vindo do calendário)."""
+    texto = (texto or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", texto):
+        try:
+            return date.fromisoformat(texto)
+        except ValueError:
+            return None
+    dig = re.sub(r"\D", "", texto)
     if len(dig) != 8:
         return None
     try:
@@ -4347,63 +5127,154 @@ def _parse_data(texto: str) -> date | None:
         return None
 
 
-def _para_date(valor: object) -> date | None:
-    if isinstance(valor, datetime):
-        return valor.date()
-    if isinstance(valor, date):
-        return valor
-    return _parse_data(str(valor)) if valor else None
+def _parse_documento(texto: str) -> int | None:
+    """Número do documento ou da NF. Mantém só dígitos."""
+    dig = re.sub(r"\D", "", texto or "")
+    return int(dig) if dig else None
 
 
-def _para_decimal(valor: object) -> Decimal | None:
-    if valor is None or valor == "":
-        return None
-    try:
-        return Decimal(str(valor)).quantize(Decimal("0.01"))
-    except Exception:  # noqa: BLE001
-        return None
+def _cnpj_item(item: LinhaResultado) -> str:
+    """CNPJ do boleto para conferência. Se veio do ERP, não serve para conferir."""
+    b = item.beneficiario
+    if b is None or item.beneficiario_erp:
+        return ""
+    return so_digitos(b.documento_formatado)
 
 
-def vencimento_efetivo(item: LinhaResultado) -> date | None:
-    """Manual tem prioridade; senão, o vencimento extraído do código/PDF."""
-    return item.vencimento_manual or _para_date(item.vencimento)
+def _bloco_observacao(item: LinhaResultado) -> str:
+    """Texto gravado em pagparc_obs a partir do boleto sincronizado."""
+    b, e, s = item.beneficiario, item.empresa, item.sincronizacao
+    venc = item.vencimento_efetivo
+    p = s.parcela if s else None
+    rotulo_benef = "Beneficiário (origem ERP)" if item.beneficiario_erp else "Beneficiário"
+    campos = [
+        ("Sincronizado em", f"{datetime.now():%d/%m/%Y %H:%M}"),
+        ("Emissor", item.emissor),
+        ("Linha digitável", formatar_linha(item.linha)),
+        ("Vencimento", venc.strftime("%d/%m/%Y") if venc else ""),
+        ("Valor", formatar_valor(item.valor) if item.valor is not None else ""),
+        (rotulo_benef, (e.razao_social if e else "") or ""),
+        ("CNPJ/CPF beneficiário", b.documento_formatado if b else ""),
+        ("Fornecedor ERP", descrever_fornecedor(p)),
+        ("Conferência CNPJ", ROTULOS_CNPJ.get(s.conferencia_cnpj, "") if s else ""),
+        ("Arquivo", item.caminho.name if item.caminho else ""),
+    ]
+    return "\n".join(f"{k}: {v}" for k, v in campos if v)
 
 
-# ---------------- Worker de cruzamento ----------------
-class _SinaisCruzamento(QObject):
-    concluido = Signal(object, str)
+# ---------------- Worker de sincronização ----------------
+class _SinaisSincronizacao(QObject):
+    concluido = Signal(object, object, str)  # (resultados, {chave: DadosEmpresa|None}, erro)
 
 
-class _CruzamentoWorker(QRunnable):
-    def __init__(self, repo: ErpParcelaRepository, itens: list[ItemCruzamento]) -> None:
+class _SincronizacaoWorker(QRunnable):
+    def __init__(self, repo: ErpParcelaRepository, itens: list[ItemSincronizacao], modo: str,
+                 preencher: set[str], lookup: object | None) -> None:
         super().__init__()
-        self.signals = _SinaisCruzamento()
+        self.setAutoDelete(False)
+        self.signals = _SinaisSincronizacao()
         self._repo = repo
         self._itens = itens
+        self._modo = modo
+        self._preencher = preencher  # chaves de linhas sem beneficiário (ou já vindo do ERP)
+        self._lookup = lookup
+
+    def _rodar(self, itens: list[ItemSincronizacao], modo: str) -> list[ResultadoSincronizacao]:
+        parcelas = self._repo.parcelas_por_chaves((i.documento for i in itens), modo)
+        return list(executar_sincronizacao(itens, parcelas))
+
+    def _buscar(self) -> list[ResultadoSincronizacao]:
+        if self._modo != "auto":
+            return self._rodar(self._itens, self._modo)
+        # Automático: documento primeiro, NF para quem não foi encontrado
+        resultados = self._rodar(self._itens, "documento")
+        faltantes = {r.chave for r in resultados if r.status.value in _SEM_MATCH}
+        if faltantes:
+            itens_nf = [i for i in self._itens if i.chave in faltantes]
+            por_nf = {r.chave: r for r in self._rodar(itens_nf, "nota")}
+            resultados = [
+                por_nf[r.chave]
+                if r.chave in por_nf and por_nf[r.chave].status.value not in _SEM_MATCH
+                else r
+                for r in resultados
+            ]
+        return resultados
+
+    def _empresas(self, resultados: list[ResultadoSincronizacao]) -> dict[str, DadosEmpresa | None]:
+        """Consulta OpenCNPJ/BigQuery para os fornecedores que vão preencher o beneficiário."""
+        saida: dict[str, DadosEmpresa | None] = {}
+        if self._lookup is None:
+            return saida
+        cache: dict[str, DadosEmpresa | None] = {}
+        for r in resultados:
+            p = r.parcela
+            if r.chave not in self._preencher or p is None or len(p.fornecedor_cnpj) != 14:
+                continue
+            cnpj = p.fornecedor_cnpj
+            if cnpj not in cache:
+                try:
+                    cache[cnpj] = self._lookup.consultar(cnpj)
+                except Exception:  # noqa: BLE001 - consulta é opcional
+                    cache[cnpj] = None
+            saida[r.chave] = cache[cnpj]
+        return saida
 
     def run(self) -> None:
         try:
-            parcelas = self._repo.parcelas_das_contas(i.documento for i in self._itens)
-            self.signals.concluido.emit(cruzar(self._itens, parcelas), "")
+            resultados = self._buscar()
+        except Exception as exc:  # noqa: BLE001 - a interface nunca pode quebrar
+            self.signals.concluido.emit([], {}, f"Erro no banco: {exc}")
+            return
+        self.signals.concluido.emit(resultados, self._empresas(resultados), "")
+
+
+# ---------------- Worker de observações ----------------
+class _SinaisObservacao(QObject):
+    concluido = Signal(object, str)  # (list[ResultadoObservacao], erro)
+
+
+class _ObservacaoWorker(QRunnable):
+    def __init__(self, repo: ErpEscritaRepository, tarefas: list[tuple[int, str, str]]) -> None:
+        super().__init__()
+        self.setAutoDelete(False)
+        self.signals = _SinaisObservacao()
+        self._repo = repo
+        self._tarefas = tarefas  # (pagparc_cod, bloco, cnpj)
+
+    def run(self) -> None:
+        try:
+            saida = [self._repo.gravar_observacao(cod, bloco, cnpj) for cod, bloco, cnpj in self._tarefas]
+            self.signals.concluido.emit(saida, "")
         except Exception as exc:  # noqa: BLE001
-            self.signals.concluido.emit([], f"Erro no banco: {exc}")
+            self.signals.concluido.emit([], f"Erro ao gravar observações: {exc}")
 
 
 class MainViewModel(QObject):
     estadoChanged = Signal()
     notificacao = Signal(str)
     senhaChanged = Signal()
-    cruzandoChanged = Signal()
+    sincronizandoChanged = Signal()
+    erpChanged = Signal()
+    modoBuscaChanged = Signal()
 
     def __init__(
         self,
         use_case: ExtractBoletoUseCase,
         repositorio: ErpParcelaRepository | None = None,
         parent: QObject | None = None,
+        *,
+        erp_ativo: Callable[[], bool] | None = None,
+        escrita: ErpEscritaRepository | None = None,
+        cnpj_lookup: object | None = None,
     ) -> None:
         super().__init__(parent)
         self._use_case = use_case
         self._repo = repositorio
+        self._escrita = escrita
+        self._erp_ativo = erp_ativo
+        # Reaproveita a consulta de CNPJ do use case se nenhuma for passada
+        self._lookup = cnpj_lookup or getattr(use_case, "_cnpj_lookup", None)
+        self._erp_ok = self._calcular_erp_ok()
         self._model = ResultListModel(self)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(settings.max_workers)
@@ -4411,15 +5282,80 @@ class MainViewModel(QObject):
         self._proximo_id = 0
         self._total = 0
         self._concluidos = 0
-        # Fila de PDFs protegidos aguardando senha
         self._fila_senha: list[tuple[int, Path]] = []
         self._tentativas = 0
         self._erro_senha = ""
-        self._atendidos = 0  # para "Arquivo X de Y"
-        # Cruzamento
-        self._cruzando = False
-        self._worker_cruzamento: _CruzamentoWorker | None = None
+        self._atendidos = 0
+        self._sincronizando = False
+        self._worker_sinc: _SincronizacaoWorker | None = None
+        self._salvando_obs = False
+        self._worker_obs: _ObservacaoWorker | None = None
+        self._qs = QSettings()
+        modo = str(self._qs.value("modo_busca", "documento"))
+        self._modo_busca = modo if modo in MODOS else "documento"
 
+    # ---------------- ERP dinâmico ----------------
+    def _calcular_erp_ok(self) -> bool:
+        if self._repo is None:
+            return False
+        if self._erp_ativo is None:
+            return True
+        try:
+            return bool(self._erp_ativo())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _repo_ativo(self) -> ErpParcelaRepository | None:
+        return self._repo if self._calcular_erp_ok() else None
+
+    @property
+    def _ocupado(self) -> bool:
+        return self._sincronizando or self._salvando_obs
+
+    @Slot()
+    def atualizarErp(self) -> None:
+        """Chamado pelo QML após salvar/fechar as configurações."""
+        if self._repo is not None and not self._ocupado:
+            for nome in ("recarregar", "fechar"):
+                metodo = getattr(self._repo, nome, None)
+                if callable(metodo):
+                    try:
+                        metodo()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break
+        novo = self._calcular_erp_ok()
+        if novo != self._erp_ok:
+            self._erp_ok = novo
+            self.erpChanged.emit()
+
+    @Property(bool, notify=erpChanged)
+    def erpConfigurado(self) -> bool:
+        return self._erp_ok
+
+    # ---------------- Modo de busca (documento | nota | auto) ----------------
+    @Property(str, notify=modoBuscaChanged)
+    def modoBusca(self) -> str:
+        return self._modo_busca
+
+    @Property(str, notify=modoBuscaChanged)
+    def rotuloChave(self) -> str:
+        return _ROTULO_MODO[self._modo_busca]
+
+    @Slot(str)
+    def definirModoBusca(self, modo: str) -> None:
+        if self._ocupado or modo not in MODOS or modo == self._modo_busca:
+            return
+        self._modo_busca = modo
+        self._qs.setValue("modo_busca", modo)
+        for linha, it in enumerate(self._model.itens()):
+            if it.sincronizacao is not None:
+                self._model.alterar(linha, sincronizacao=None)
+        self.modoBuscaChanged.emit()
+        self.estadoChanged.emit()
+        self.notificacao.emit(f"🔎 Busca no ERP por: {_ROTULO_MODO[modo]}")
+
+    # ---------------- Propriedades gerais ----------------
     @Property(QObject, constant=True)
     def resultados(self) -> ResultListModel:
         return self._model
@@ -4442,24 +5378,63 @@ class MainViewModel(QObject):
             f"⛔ {m.contar(ExtractionStatus.ERROR)}"
         )
         total = m.total_valor()
-        return f"{texto}   •   Total: {formatar_valor(total)}" if total else texto
+        if total:
+            texto += f"   •   Total: {formatar_valor(total)}"
+        ok = m.contar_erp(StatusSincronizacao.ENCONTRADO.value)
+        pagos = m.contar_erp(StatusSincronizacao.JA_PAGO.value)
+        if ok or pagos:
+            texto += f"   •   🔗 ERP: {ok} encontrado(s), {pagos} já pago(s)"
+            diverg = sum(
+                1 for it in m.itens()
+                if it.sincronizacao is not None and it.sincronizacao.conferencia_cnpj == CNPJ_DIVERGE
+            )
+            if diverg:
+                texto += f", ⚠ {diverg} CNPJ divergente(s)"
+        return texto
 
     @Property(int, notify=estadoChanged)
     def quantidade(self) -> int:
         return self._model.rowCount()
 
-    # ---------------- Propriedades do cruzamento ----------------
-    @Property(bool, notify=cruzandoChanged)
-    def cruzando(self) -> bool:
-        return self._cruzando
+    # ---------------- Propriedades da sincronização ----------------
+    @Property(bool, notify=sincronizandoChanged)
+    def sincronizando(self) -> bool:
+        return self._sincronizando
 
-    @Property(bool, constant=True)
-    def erpConfigurado(self) -> bool:
-        return self._repo is not None
+    def _set_sincronizando(self, valor: bool) -> None:
+        self._sincronizando = valor
+        self.sincronizandoChanged.emit()
+        self.estadoChanged.emit()
 
-    def _set_cruzando(self, valor: bool) -> None:
-        self._cruzando = valor
-        self.cruzandoChanged.emit()
+    # ---------------- Propriedades das observações ----------------
+    def _itens_para_obs(self) -> list[LinhaResultado]:
+        return [
+            it for it in self._model.itens()
+            if it.sincronizacao is not None
+            and it.sincronizacao.status == StatusSincronizacao.ENCONTRADO
+            and it.sincronizacao.parcela is not None
+        ]
+
+    @Property(bool, notify=estadoChanged)
+    def salvandoObs(self) -> bool:
+        return self._salvando_obs
+
+    @Property(int, notify=estadoChanged)
+    def quantidadeObs(self) -> int:
+        return len(self._itens_para_obs())
+
+    @Property(bool, notify=estadoChanged)
+    def podeSalvarObs(self) -> bool:
+        return (
+            self._escrita is not None
+            and not self._ocupado
+            and not self.processando
+            and bool(self._itens_para_obs())
+        )
+
+    def _set_salvando_obs(self, valor: bool) -> None:
+        self._salvando_obs = valor
+        self.estadoChanged.emit()
 
     # ---------------- Propriedades da janela de senha ----------------
     @Property(bool, notify=senhaChanged)
@@ -4610,7 +5585,6 @@ class MainViewModel(QObject):
         self._reprocessar(job_id, arquivo)
         abertos = 1
 
-        # A mesma senha pode abrir os próximos arquivos do mesmo emissor
         if usar_nos_proximos:
             for item in list(self._fila_senha):
                 if not senhas_pdf.precisa_senha(item[1]):
@@ -4650,93 +5624,222 @@ class MainViewModel(QObject):
         self._erro_senha = ""
         self.senhaChanged.emit()
 
-    # ---------------- Edição para o cruzamento ----------------
+    # ---------------- Edição para a sincronização ----------------
     @Slot(int, str)
     def definirDocumento(self, linha: int, texto: str) -> None:
+        """Chamado a cada tecla: o valor nunca depende da perda de foco."""
         item = self._model.item(linha)
-        if item is None:
+        if item is None or not item.elegivel or self._ocupado:
             return
-        dig = re.sub(r"\D", "", texto or "")
-        novo = int(dig) if dig else None
+        novo = _parse_documento(texto)
+        if novo == item.documento_erp and not item.erro_documento:
+            return
         campos: dict[str, object] = {"erro_documento": False}
-        if novo != item.documento:
-            campos |= {"documento": novo, "cruzamento": None}
+        if novo != item.documento_erp:
+            campos |= {"documento_erp": novo, "sincronizacao": None}
         self._model.alterar(linha, **campos)
+        self.estadoChanged.emit()
+
+    @Slot(str, bool, result=int)
+    def aplicarDocumentoTodos(self, texto: str, sobrescrever: bool) -> int:
+        """Aplica o mesmo documento/NF a todos os boletos válidos."""
+        rotulo = _ROTULO_MODO[self._modo_busca]
+        if self._ocupado:
+            self.notificacao.emit("⚠ Aguarde o fim da operação com o ERP.")
+            return 0
+        novo = _parse_documento(texto)
+        if novo is None:
+            self.notificacao.emit(f"⚠ Informe o número ({rotulo}).")
+            return 0
+
+        alterados = preservados = 0
+        for linha, it in enumerate(self._model.itens()):
+            if not it.elegivel:
+                continue
+            if it.documento_erp is not None and it.documento_erp != novo and not sobrescrever:
+                preservados += 1
+                continue
+            campos: dict[str, object] = {"erro_documento": False}
+            if it.documento_erp != novo:
+                campos |= {"documento_erp": novo, "sincronizacao": None}
+                alterados += 1
+            self._model.alterar(linha, **campos)
+
+        if not alterados and not preservados:
+            self.notificacao.emit("Nenhum boleto válido para receber o número.")
+        else:
+            extra = f" ({preservados} já preenchido(s) mantido(s))" if preservados else ""
+            self.notificacao.emit(f"📄 {rotulo} {novo} aplicado a {alterados} item(ns){extra}")
+        self.estadoChanged.emit()
+        return alterados
 
     @Slot(int, str)
     def definirVencimento(self, linha: int, texto: str) -> None:
         item = self._model.item(linha)
-        if item is None or _para_date(item.vencimento):
-            return  # vencimento vindo da extração fica travado
+        if item is None or not item.elegivel or item.vencimento_travado or self._ocupado:
+            return
         digitos = re.sub(r"\D", "", texto or "")
         nova = _parse_data(texto)
         if digitos and nova is None:
             self._model.alterar(linha, erro_data=True)
             self.notificacao.emit(f"⚠ Data inválida na linha {linha + 1}")
             return
-        campos: dict[str, object] = {"erro_data": nova is None}
+        campos: dict[str, object] = {"erro_data": False}
         if nova != item.vencimento_manual:
-            campos |= {"vencimento_manual": nova, "cruzamento": None}
+            campos |= {"vencimento_manual": nova, "sincronizacao": None}
         self._model.alterar(linha, **campos)
+        self.estadoChanged.emit()
 
-    @Slot(int, result=bool)
-    def vencimentoEditavel(self, linha: int) -> bool:
-        item = self._model.item(linha)
-        return item is not None and _para_date(item.vencimento) is None
-
-    # ---------------- Cruzamento ----------------
+    # ---------------- Sincronização ----------------
     @Slot()
-    def cruzar(self) -> None:
-        if self._repo is None:
-            self.notificacao.emit("⚠ Configure a conexão com o ERP antes de cruzar.")
+    def sincronizar(self) -> None:
+        self.atualizarErp()
+        repo = self._repo_ativo()
+        if repo is None:
+            if self._repo is None:
+                self.notificacao.emit("⛔ Repositório do ERP não inicializado (verifique o app.py).")
+            else:
+                self.notificacao.emit(
+                    "⚠ Marque \"Integrar com o banco MySQL do ERP\" em ⚙ e salve antes de sincronizar."
+                )
             return
-        if self._cruzando or self.processando:
+        if self._ocupado or self.processando:
             return
 
-        elegiveis = [
-            (i, it) for i, it in enumerate(self._model.itens())
-            if it.status == ExtractionStatus.SUCCESS and it.codigo
-        ]
+        elegiveis = [(i, it) for i, it in enumerate(self._model.itens()) if it.elegivel]
         if not elegiveis:
-            self.notificacao.emit("Nenhum boleto válido para cruzar.")
+            self.notificacao.emit("Nenhum boleto válido para sincronizar.")
             return
 
-        pendentes = 0
-        itens: list[ItemCruzamento] = []
+        pendentes = sem_valor = 0
+        itens: list[ItemSincronizacao] = []
+        preencher: set[str] = set()
         for linha, it in elegiveis:
-            venc = vencimento_efetivo(it)
-            valor = _para_decimal(it.valor)
-            erro_doc, erro_data = it.documento is None, venc is None
+            if it.valor is None:
+                sem_valor += 1
+                continue
+            venc = it.vencimento_efetivo
+            erro_doc, erro_data = it.documento_erp is None, venc is None
             self._model.alterar(linha, erro_documento=erro_doc, erro_data=erro_data)
-            if erro_doc or erro_data or valor is None:
+            if erro_doc or erro_data:
                 pendentes += 1
                 continue
-            itens.append(ItemCruzamento(it.codigo, it.documento, venc, valor))
+            itens.append(ItemSincronizacao(it.chave, it.documento_erp, venc, it.valor, _cnpj_item(it)))
+            if it.beneficiario is None or it.beneficiario_erp:
+                preencher.add(it.chave)
 
         if pendentes:
             self.notificacao.emit(
-                f"⚠ {pendentes} linha(s) sem documento ou data. Preencha os campos em vermelho."
+                f"⚠ {pendentes} linha(s) sem {_ROTULO_MODO[self._modo_busca]} ou vencimento. "
+                "Preencha os campos em vermelho."
             )
             return
+        if not itens:
+            self.notificacao.emit("Nenhum boleto com valor para sincronizar.")
+            return
 
-        self._set_cruzando(True)
-        self.notificacao.emit("Consultando ERP…")
-        worker = _CruzamentoWorker(self._repo, itens)
-        worker.signals.concluido.connect(self._ao_cruzar)
-        self._worker_cruzamento = worker
+        self._set_sincronizando(True)
+        aviso = f" ({sem_valor} sem valor ignorado(s))" if sem_valor else ""
+        self.notificacao.emit(f"Sincronizando com o ERP por {_ROTULO_MODO[self._modo_busca]}…{aviso}")
+        worker = _SincronizacaoWorker(repo, itens, self._modo_busca, preencher, self._lookup)
+        worker.signals.concluido.connect(self._ao_sincronizar)
+        self._worker_sinc = worker
         self._pool.start(worker)
 
-    @Slot(object, str)
-    def _ao_cruzar(self, resultados: list, erro: str) -> None:
-        self._worker_cruzamento = None
-        self._set_cruzando(False)
+    def _preencher_beneficiarios(
+        self,
+        por_chave: dict[str, ResultadoSincronizacao],
+        empresas: dict[str, DadosEmpresa | None],
+    ) -> int:
+        """Linhas sem beneficiário recebem o fornecedor da parcela encontrada."""
+        preenchidos = 0
+        for linha, it in enumerate(self._model.itens()):
+            r = por_chave.get(it.chave)
+            if r is None or (it.beneficiario is not None and not it.beneficiario_erp):
+                continue
+            p = r.parcela
+            if p is None or not p.tem_fornecedor or not p.fornecedor_cnpj:
+                continue
+            doc = p.fornecedor_cnpj
+            tipo = "CNPJ" if len(doc) == 14 else "CPF" if len(doc) == 11 else "Documento"
+            empresa = empresas.get(r.chave) or DadosEmpresa(razao_social=p.fornecedor_nome)
+            benef = Beneficiario(documento=doc, tipo=tipo, empresa=empresa, confirmado_pelo_codigo=False)
+            self._model.alterar(linha, beneficiario=benef, beneficiario_erp=True,
+                                fornecedor_erp_cod=p.fornecedor_cod)
+            por_chave[r.chave] = com_origem_erp(r)
+            preenchidos += 1
+        return preenchidos
+
+    @Slot(object, object, str)
+    def _ao_sincronizar(self, resultados: list[ResultadoSincronizacao],
+                        empresas: dict[str, DadosEmpresa | None], erro: str) -> None:
+        self._worker_sinc = None
+        self._set_sincronizando(False)
         if erro:
             self.notificacao.emit(f"⛔ {erro}")
             return
-        self._model.aplicar_cruzamento({r.chave: r for r in resultados})
-        ok = sum(1 for r in resultados if r.status == StatusCruzamento.ENCONTRADO)
-        self.notificacao.emit(f"🔗 Cruzamento concluído: {ok}/{len(resultados)} encontrado(s)")
+        por_chave = {r.chave: r for r in resultados}
+        preenchidos = self._preencher_beneficiarios(por_chave, empresas or {})
+        self._model.aplicar_sincronizacao(por_chave)
+
+        finais = list(por_chave.values())
+        ok = sum(1 for r in finais if r.status == StatusSincronizacao.ENCONTRADO)
+        diverg = sum(1 for r in finais if r.conferencia_cnpj == CNPJ_DIVERGE)
+        sem_forn = sum(1 for r in finais if r.conferencia_cnpj == CNPJ_SEM_FORNECEDOR)
+        partes = [f"🔗 Sincronização concluída: {ok}/{len(finais)} encontrado(s)"]
+        if preenchidos:
+            partes.append(f"👤 {preenchidos} beneficiário(s) preenchido(s) pelo ERP")
+        if diverg:
+            partes.append(f"⚠ {diverg} com CNPJ divergente")
+        if sem_forn:
+            partes.append(f"{sem_forn} parcela(s) sem fornecedor")
+        self.notificacao.emit("  •  ".join(partes))
         self.estadoChanged.emit()
+
+    # ---------------- Observações (grava somente pagparc_obs) ----------------
+    @Slot()
+    def salvarObservacoes(self) -> None:
+        if self._escrita is None:
+            self.notificacao.emit("⛔ Repositório de escrita do ERP não inicializado (verifique o app.py).")
+            return
+        if not self.podeSalvarObs:
+            return
+
+        tarefas: list[tuple[int, str, str]] = []
+        vistos: set[int] = set()
+        for it in self._itens_para_obs():
+            cod = it.sincronizacao.parcela.cod
+            if cod in vistos:
+                continue
+            vistos.add(cod)
+            tarefas.append((cod, _bloco_observacao(it), _cnpj_item(it)))
+
+        self._set_salvando_obs(True)
+        self.notificacao.emit(f"📝 Gravando observações em {len(tarefas)} parcela(s)…")
+        worker = _ObservacaoWorker(self._escrita, tarefas)
+        worker.signals.concluido.connect(self._ao_salvar_obs)
+        self._worker_obs = worker
+        self._pool.start(worker)
+
+    @Slot(object, str)
+    def _ao_salvar_obs(self, resultados: list[ResultadoObservacao], erro: str) -> None:
+        self._worker_obs = None
+        self._set_salvando_obs(False)
+        if erro:
+            self.notificacao.emit(f"⛔ {erro}")
+            return
+        ok = sum(1 for r in resultados if r.ok)
+        falhas = len(resultados) - ok
+        sugeridos = sum(1 for r in resultados if r.ok and r.fornecedor)
+        sem_cadastro = sum(1 for r in resultados if r.ok and r.fornecedor_ausente and not r.fornecedor)
+        partes = [f"📝 Observações gravadas: {ok}/{len(resultados)}"]
+        if sugeridos:
+            partes.append(f"{sugeridos} fornecedor(es) localizado(s) e anotado(s)")
+        if sem_cadastro:
+            partes.append(f"{sem_cadastro} sem fornecedor cadastrado")
+        if falhas:
+            partes.append(f"⚠ {falhas} falha(s)")
+        self.notificacao.emit("  •  ".join(partes))
 
     # ---------------- Ações ----------------
     @Slot(str)
@@ -4749,21 +5852,26 @@ class MainViewModel(QObject):
     def _linha_csv(item: LinhaResultado) -> list[object]:
         b = item.beneficiario
         e = item.empresa
-        c = item.cruzamento
-        venc = vencimento_efetivo(item)
+        s = item.sincronizacao
+        p = s.parcela if s else None
+        venc = item.vencimento_efetivo
         return [
             item.caminho.name, item.pagina or "", item.status, item.tipo,
-            item.emissor, venc.strftime("%d/%m/%Y") if venc else "",
+            item.emissor, venc.strftime("%d/%m/%Y") if venc else item.vencimento,
             formatar_valor_csv(item.valor),
             formatar_linha(item.linha), item.codigo, item.mensagem,
             b.documento_formatado if b else "", b.tipo if b else "",
             e.razao_social, e.nome_fantasia, e.situacao_cadastral, e.municipio, e.uf,
             e.email, e.telefone, e.cnae_principal, e.porte_empresa,
             e.opcao_simples, e.opcao_mei,
-            item.documento or "",
-            ROTULOS[c.status] if c else "",
-            c.parcela.rotulo if c and c.parcela else "",
-            c.detalhe if c else "",
+            item.documento_erp if item.documento_erp is not None else "",
+            ROTULOS[s.status] if s else "",
+            p.rotulo if p else "",
+            s.detalhe.replace("\n", " | ") if s else "",
+            f"{p.fornecedor_cod} - {p.fornecedor_nome}" if p and p.tem_fornecedor else "",
+            formatar_documento(p.fornecedor_cnpj) if p and p.tem_fornecedor else "",
+            ROTULOS_CNPJ.get(s.conferencia_cnpj, "") if s else "",
+            ("ERP" if item.beneficiario_erp else "Boleto") if b else "",
         ]
 
     @Slot(QUrl)
@@ -4781,7 +5889,7 @@ class MainViewModel(QObject):
 
     @Slot()
     def limpar(self) -> None:
-        if not self.processando and not self._cruzando:
+        if not self.processando and not self._ocupado:
             self._model.limpar()
             self.pularTodasSenhas()
             self.estadoChanged.emit()
@@ -4791,6 +5899,7 @@ class MainViewModel(QObject):
 ARQUIVO: src/boleto_extractor/presentation/viewmodels/result_list_model.py
 ================================================================================
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -4803,6 +5912,10 @@ from PySide6.QtCore import (
     Qt,
 )
 
+from boleto_extractor.application.services.matching_service import (
+    ROTULOS,
+    ResultadoSincronizacao,
+)
 from boleto_extractor.domain.entities.beneficiario import Beneficiario, DadosEmpresa
 from boleto_extractor.domain.entities.extraction_result import ExtractionResult
 from boleto_extractor.domain.enums.boleto_type import BoletoType
@@ -4823,6 +5936,10 @@ _CAMPOS = (
     "arquivo", "caminho", "pagina", "status", "tipo", "emissor", "vencimento",
     "valor", "linha", "linhaFormatada", "codigo", "mensagem",
     "beneficiario", "beneficiarioDoc", "situacao", "beneficiarioDetalhe", "protegido",
+    # Sincronização com o ERP
+    "elegivel", "documentoErp", "vencimentoTexto", "vencimentoIso", "vencimentoEditavel",
+    "erroDocumento", "erroData", "statusErp", "statusErpTexto", "parcelaErp", "detalheErp",
+    "beneficiarioErp", "conferenciaCnpj",
 )
 _BASE = Qt.ItemDataRole.UserRole.value + 1
 _VAZIA = DadosEmpresa()
@@ -4837,13 +5954,24 @@ class LinhaResultado:
     status: str = ExtractionStatus.PENDING.value
     tipo: str = ""
     emissor: str = ""
-    vencimento: str = ""
+    vencimento: str = ""                      # texto exibido (formatar_data)
     valor: Decimal | None = None
     linha: str = ""
     codigo: str = ""
     mensagem: str = "Na fila…"
     beneficiario: Beneficiario | None = None
     protegido: bool = False
+    # ---- Sincronização ----
+    vencimento_data: date | None = None       # data extraída
+    vencimento_travado: bool = False          # True = veio do fator do código (confiável)
+    vencimento_manual: date | None = None     # digitada/escolhida no calendário
+    documento_erp: int | None = None          # pagparc_documento
+    erro_documento: bool = False
+    erro_data: bool = False
+    sincronizacao: ResultadoSincronizacao | None = None
+    # ---- Beneficiário vindo do fornecedor do ERP ----
+    beneficiario_erp: bool = False
+    fornecedor_erp_cod: int = 0
 
     @property
     def empresa(self) -> DadosEmpresa:
@@ -4852,8 +5980,24 @@ class LinhaResultado:
         return _VAZIA
 
     @property
-    def documento(self) -> str:
+    def beneficiario_doc(self) -> str:
+        """CPF/CNPJ do beneficiário (não confundir com documento_erp)."""
         return self.beneficiario.documento_formatado if self.beneficiario else ""
+
+    @property
+    def chave(self) -> str:
+        """Identificador único da linha para a sincronização."""
+        return f"{self.job_id}:{self.pagina or 0}:{self.codigo}"
+
+    @property
+    def elegivel(self) -> bool:
+        return self.status == ExtractionStatus.SUCCESS.value and bool(self.codigo)
+
+    @property
+    def vencimento_efetivo(self) -> date | None:
+        if self.vencimento_travado:
+            return self.vencimento_data
+        return self.vencimento_manual or self.vencimento_data
 
     def detalhe_beneficiario(self) -> str:
         b = self.beneficiario
@@ -4875,7 +6019,9 @@ class LinhaResultado:
             ("MEI", e.opcao_mei),
         )
         linhas = [f"{k}: {v}" for k, v in pares if v]
-        if b.confirmado_pelo_codigo:
+        if self.beneficiario_erp:
+            linhas.append(f"🔗 Origem ERP: fornecedor #{self.fornecedor_erp_cod}")
+        elif b.confirmado_pelo_codigo:
             linhas.append("✔ CNPJ confirmado pelo código de barras")
         if b.tipo == "CNPJ" and b.empresa is None:
             linhas.append("Dados da empresa indisponíveis no momento")
@@ -4905,6 +6051,8 @@ class ResultListModel(QAbstractListModel):
         if campo == "beneficiarioDetalhe":
             return item.detalhe_beneficiario()
 
+        venc = item.vencimento_efetivo
+        s = item.sincronizacao
         valores: dict[str, object] = {
             "arquivo": item.caminho.name,
             "caminho": str(item.caminho),
@@ -4919,9 +6067,22 @@ class ResultListModel(QAbstractListModel):
             "codigo": item.codigo,
             "mensagem": item.mensagem,
             "beneficiario": item.beneficiario.nome if item.beneficiario else "",
-            "beneficiarioDoc": item.documento,
+            "beneficiarioDoc": item.beneficiario_doc,
             "situacao": item.empresa.situacao_cadastral,
             "protegido": item.protegido,
+            "elegivel": item.elegivel,
+            "documentoErp": str(item.documento_erp) if item.documento_erp is not None else "",
+            "vencimentoTexto": venc.strftime("%d/%m/%Y") if venc else "",
+            "vencimentoIso": venc.isoformat() if venc else "",
+            "vencimentoEditavel": item.elegivel and not item.vencimento_travado,
+            "erroDocumento": item.erro_documento,
+            "erroData": item.erro_data,
+            "statusErp": s.status.value if s else "",
+            "statusErpTexto": ROTULOS[s.status] if s else "",
+            "parcelaErp": s.parcela.rotulo if s and s.parcela else "",
+            "detalheErp": s.detalhe if s else "",
+            "beneficiarioErp": item.beneficiario_erp,
+            "conferenciaCnpj": s.conferencia_cnpj if s else "",
         }
         return valores[campo]
 
@@ -5001,7 +6162,10 @@ class ResultListModel(QAbstractListModel):
         item.pagina = resultado.pagina
         item.mensagem = " | ".join(resultado.mensagens)
         item.beneficiario = resultado.beneficiario
+        item.beneficiario_erp = False
+        item.fornecedor_erp_cod = 0
         item.protegido = False
+        item.sincronizacao = None  # documento_erp e data manual são preservados
 
         boleto = resultado.boleto
         if boleto is None:
@@ -5016,7 +6180,40 @@ class ResultListModel(QAbstractListModel):
             item.emissor = d.emissor
             item.valor = d.valor
             item.vencimento = formatar_data(d.vencimento, d.vencimento_estimado)
+            item.vencimento_data = d.vencimento
+            # Só o fator de vencimento da cobrança é confiável o bastante para travar
+            item.vencimento_travado = (
+                boleto.tipo == BoletoType.BANK_SLIP
+                and d.vencimento is not None
+                and not d.vencimento_estimado
+            )
 
+    # ---------------- Sincronização ----------------
+    def alterar(self, linha: int, **campos: object) -> None:
+        item = self.item(linha)
+        if item is None:
+            return
+        for nome, valor in campos.items():
+            setattr(item, nome, valor)
+        # Sincronização desfeita: o beneficiário que veio do ERP deixa de valer
+        if "sincronizacao" in campos and campos["sincronizacao"] is None and item.beneficiario_erp:
+            item.beneficiario = None
+            item.beneficiario_erp = False
+            item.fornecedor_erp_cod = 0
+        self._notificar(linha)
+
+    def aplicar_sincronizacao(self, por_chave: dict[str, ResultadoSincronizacao]) -> None:
+        for i, item in enumerate(self._itens):
+            if (r := por_chave.get(item.chave)) is not None:
+                item.sincronizacao = r
+                self._notificar(i)
+
+    def contar_erp(self, status: str) -> int:
+        return sum(
+            1 for i in self._itens if i.sincronizacao and i.sincronizacao.status.value == status
+        )
+
+    # ---------------- Utilitários ----------------
     def contem_codigo(self, codigo: str) -> bool:
         return any(item.codigo == codigo for item in self._itens)
 

@@ -18,17 +18,23 @@ ApplicationWindow {
         review: "Revisar", error: "Erro"
     })
 
-    // Status do ERP -> cor do tema
+    // Status do ERP -> cor do tema (mesmos valores de StatusSincronizacao)
     readonly property var corErp: ({
         encontrado: "success", ja_pago: "review", data_divergente: "review",
         valor_divergente: "review", doc_inexistente: "invalid",
         nao_encontrado: "invalid", duplicado: "error"
     })
 
+    readonly property var modosBusca: [
+        { nome: "Documento", id: "documento" },
+        { nome: "Nota fiscal", id: "nota" },
+        { nome: "Automático (Doc → NF)", id: "auto" }
+    ]
+
     readonly property var colunas: [
         { t: "STATUS", w: 92 }, { t: "ARQUIVO", w: 140 }, { t: "BENEFICIÁRIO", w: 200 },
-        { t: "EMISSOR", w: 110 }, { t: "DOCUMENTO", w: 100 }, { t: "VENCIMENTO", w: 140 },
-        { t: "VALOR", w: 100 }, { t: "ERP", w: 150 },
+        { t: "EMISSOR", w: 110 }, { t: viewModel.rotuloChave.toUpperCase(), w: 100 },
+        { t: "VENCIMENTO", w: 140 }, { t: "VALOR", w: 100 }, { t: "ERP", w: 150 },
         { t: "LINHA DIGITÁVEL", w: -1 }, { t: "", w: 90 }
     ]
 
@@ -43,6 +49,16 @@ ApplicationWindow {
         toast.texto = mensagem
         toast.opacity = 1
         toastTimer.restart()
+    }
+
+    function aplicarDocumentoTodos() {
+        if (docTodosInput.text.trim().length === 0) {
+            docTodosInput.forceActiveFocus()
+            return
+        }
+        if (viewModel.aplicarDocumentoTodos(docTodosInput.text, sobrescreverCheck.checked) > 0)
+            docTodosInput.clear()
+        codigoInput.forceActiveFocus()
     }
 
     // Aceita CNPJ numérico ou alfanumérico (12 alfanuméricos + 2 dígitos verificadores)
@@ -123,8 +139,52 @@ ApplicationWindow {
         }
     }
 
+    component ThemedCombo: ComboBox {
+        id: combo
+        textRole: "nome"
+        valueRole: "id"
+        focusPolicy: Qt.NoFocus
+        contentItem: Text {
+            leftPadding: 12
+            text: combo.displayText
+            color: Theme.t.input.text
+            font.family: Theme.t.input.font.family
+            font.pixelSize: Theme.t.input.font.pixelSize
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        background: Rectangle {
+            implicitHeight: 38
+            radius: Theme.t.input.radius
+            color: Theme.t.input.background
+            border.color: combo.activeFocus ? Theme.t.input.borderFocus : Theme.t.input.border
+        }
+        delegate: ItemDelegate {
+            required property var modelData
+            required property int index
+            width: combo.width
+            highlighted: combo.highlightedIndex === index
+            contentItem: Text {
+                text: modelData.nome
+                color: Theme.t.body.color
+                font.family: Theme.t.body.font.family
+                font.pixelSize: Theme.t.body.font.pixelSize
+            }
+            background: Rectangle {
+                color: highlighted ? Theme.t.table.rowHover : Theme.t.surface
+            }
+        }
+        popup.background: Rectangle {
+            color: Theme.t.surface
+            border.color: Theme.t.border
+            radius: 8
+        }
+        opacity: enabled ? 1 : 0.45
+    }
+
     component ThemedCheck: CheckBox {
         id: chk
+        focusPolicy: Qt.NoFocus
         contentItem: Text {
             text: chk.text
             leftPadding: chk.indicator.width + chk.spacing
@@ -472,6 +532,7 @@ ApplicationWindow {
         }
     }
 
+    // ---------- Configurações ----------
     Dialog {
         id: configDialog
         modal: true
@@ -479,7 +540,10 @@ ApplicationWindow {
         width: 600
         height: Math.min(root.height * 0.92, 660)
         padding: 24
-        onClosed: codigoInput.forceActiveFocus()
+        onClosed: {
+            viewModel.atualizarErp()
+            codigoInput.forceActiveFocus()
+        }
         background: Rectangle {
             color: Theme.t.surface
             radius: 12
@@ -778,6 +842,7 @@ ApplicationWindow {
                     text: "Salvar"
                     onClicked: {
                         if (settings.salvar()) {
+                            viewModel.atualizarErp()
                             configDialog.close()
                             root.mostrarToast("Configurações salvas")
                         }
@@ -810,11 +875,21 @@ ApplicationWindow {
 
             ThemedButton { text: "＋ Adicionar"; onClicked: abrirDialog.open() }
             ThemedButton {
-                text: viewModel.cruzando ? "Consultando…" : "🔗 Cruzar ERP"
-                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.cruzando
-                onClicked: viewModel.cruzar()
+                text: viewModel.sincronizando ? "Sincronizando…" : "🔗 Sincronizar ERP"
+                implicitWidth: 170
+                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.sincronizando
+                onClicked: viewModel.sincronizar()
                 ToolTip.visible: hovered && !viewModel.erpConfigurado
-                ToolTip.text: "Ative o MySQL (ERP) nas configurações ⚙"
+                ToolTip.text: "Ative o MySQL (ERP) nas configurações ⚙ e salve"
+            }
+            ThemedButton {
+                text: viewModel.salvandoObs ? "Salvando…"
+                    : "📝 Salvar observações" + (viewModel.quantidadeObs > 0 ? " (" + viewModel.quantidadeObs + ")" : "")
+                implicitWidth: 210
+                enabled: viewModel.podeSalvarObs
+                onClicked: viewModel.salvarObservacoes()
+                ToolTip.visible: hovered && !enabled && !viewModel.salvandoObs
+                ToolTip.text: "Sincronize primeiro: só parcelas com status \"Encontrado\" recebem observação"
             }
             ThemedButton {
                 text: "Exportar CSV"
@@ -825,7 +900,7 @@ ApplicationWindow {
             ThemedButton {
                 text: "Limpar"
                 secundario: true
-                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.cruzando
+                enabled: viewModel.quantidade > 0 && !viewModel.processando && !viewModel.sincronizando
                 onClicked: { viewModel.limpar(); codigoInput.forceActiveFocus() }
             }
             ThemedButton {
@@ -872,6 +947,61 @@ ApplicationWindow {
                 enabled: codigoInput.text.trim().length > 0
                 onClicked: codigoInput.enviar()
             }
+        }
+
+        // ---------- Modo de busca + número para todos os itens ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            visible: viewModel.quantidade > 0
+
+            ThemedText { text: "🔎 Buscar no ERP por:"; estilo: Theme.t.subtitle }
+
+            ThemedCombo {
+                id: modoCombo
+                Layout.preferredWidth: 210
+                model: root.modosBusca
+                enabled: !viewModel.sincronizando
+                Component.onCompleted: currentIndex = indexOfValue(viewModel.modoBusca)
+                onActivated: viewModel.definirModoBusca(currentValue)
+                Connections {
+                    target: viewModel
+                    function onModoBuscaChanged() {
+                        modoCombo.currentIndex = modoCombo.indexOfValue(viewModel.modoBusca)
+                    }
+                }
+            }
+
+            Rectangle { width: 1; height: 26; color: Theme.t.border }
+
+            ThemedText { text: "📄 " + viewModel.rotuloChave + " para todos:"; estilo: Theme.t.subtitle }
+
+            ThemedInput {
+                id: docTodosInput
+                Layout.preferredWidth: 180
+                implicitHeight: 38
+                enabled: !viewModel.sincronizando
+                placeholderText: "Nº " + viewModel.rotuloChave
+                font.family: Theme.t.mono.font.family
+                maximumLength: 20
+                validator: RegularExpressionValidator { regularExpression: /[0-9]{0,20}/ }
+                onAccepted: root.aplicarDocumentoTodos()
+            }
+
+            ThemedCheck {
+                id: sobrescreverCheck
+                checked: false
+                enabled: !viewModel.sincronizando
+                text: "Sobrescrever preenchidos"
+            }
+
+            ThemedButton {
+                text: "Aplicar a todos"
+                enabled: docTodosInput.text.length > 0 && !viewModel.sincronizando
+                onClicked: root.aplicarDocumentoTodos()
+            }
+
+            Item { Layout.fillWidth: true }
         }
 
         Rectangle {
@@ -932,7 +1062,7 @@ ApplicationWindow {
 
                     delegate: Rectangle {
                         id: linhaItem
-                        required property var model
+                        // Nomes idênticos aos de _CAMPOS em result_list_model.py
                         required property int index
                         required property string arquivo
                         required property string caminho
@@ -950,8 +1080,9 @@ ApplicationWindow {
                         required property string situacao
                         required property string beneficiarioDetalhe
                         required property bool protegido
-                        // Cruzamento
+                        // Sincronização com o ERP
                         required property bool elegivel
+                        required property string documentoErp
                         required property string vencimentoTexto
                         required property string vencimentoIso
                         required property bool vencimentoEditavel
@@ -962,16 +1093,11 @@ ApplicationWindow {
                         required property string parcelaErp
                         required property string detalheErp
 
-                        // Compatível com o role antigo (pagCod) e o novo (documentoErp)
-                        readonly property string pagCod:
-                            model.pagCod !== undefined ? (model.pagCod || "")
-                            : (model.documentoErp !== undefined ? (model.documentoErp || "") : "")
-
                         readonly property bool situacaoAlerta:
                             situacao.length > 0 && situacao.toUpperCase() !== "ATIVA"
 
-                        // Mantém os campos sincronizados com o modelo após cada edição
-                        onPagCodChanged: if (!docInput.activeFocus) docInput.text = pagCod
+                        // Mantém os campos sincronizados com o modelo (ex.: "Aplicar a todos")
+                        onDocumentoErpChanged: if (!docInput.activeFocus) docInput.text = documentoErp
                         onVencimentoTextoChanged: if (!dataInput.activeFocus) dataInput.text = vencimentoTexto
 
                         width: lista.width
@@ -1028,7 +1154,7 @@ ApplicationWindow {
 
                             ThemedText { text: linhaItem.emissor || "—"; Layout.preferredWidth: 110 }
 
-                            // ---- Documento (pag_cod) ----
+                            // ---- Documento / NF ----
                             Item {
                                 Layout.preferredWidth: 100
                                 implicitHeight: 34
@@ -1036,14 +1162,16 @@ ApplicationWindow {
                                     id: docInput
                                     anchors.fill: parent
                                     visible: linhaItem.elegivel
-                                    enabled: !viewModel.cruzando
+                                    enabled: !viewModel.sincronizando
                                     erro: linhaItem.erroDocumento
-                                    text: linhaItem.pagCod
-                                    placeholderText: "pag_cod"
+                                    text: linhaItem.documentoErp
+                                    placeholderText: viewModel.rotuloChave
                                     font.family: Theme.t.mono.font.family
                                     leftPadding: 8
-                                    maximumLength: 10
-                                    validator: RegularExpressionValidator { regularExpression: /[0-9]{0,10}/ }
+                                    maximumLength: 20
+                                    validator: RegularExpressionValidator { regularExpression: /[0-9]{0,20}/ }
+                                    // Grava a cada tecla: não depende de perder o foco
+                                    onTextEdited: viewModel.definirDocumento(linhaItem.index, text)
                                     onEditingFinished: viewModel.definirDocumento(linhaItem.index, text)
                                     onAccepted: dataInput.visible && !dataInput.readOnly
                                         ? dataInput.forceActiveFocus() : codigoInput.forceActiveFocus()
@@ -1062,7 +1190,7 @@ ApplicationWindow {
                                     implicitHeight: 34
                                     visible: linhaItem.elegivel
                                     readOnly: !linhaItem.vencimentoEditavel
-                                    enabled: !viewModel.cruzando
+                                    enabled: !viewModel.sincronizando
                                     erro: linhaItem.erroData
                                     text: linhaItem.vencimentoTexto
                                     placeholderText: "dd/mm/aaaa"
@@ -1070,13 +1198,15 @@ ApplicationWindow {
                                     leftPadding: 8
                                     maximumLength: 10
                                     validator: RegularExpressionValidator { regularExpression: /[0-9\/]{0,10}/ }
-                                    // Insere as barras automaticamente
+                                    // Insere as barras e grava quando a data estiver completa
                                     onTextEdited: {
                                         const d = text.replace(/\D/g, "").slice(0, 8)
                                         let f = d
                                         if (d.length > 4) f = d.slice(0, 2) + "/" + d.slice(2, 4) + "/" + d.slice(4)
                                         else if (d.length > 2) f = d.slice(0, 2) + "/" + d.slice(2)
                                         if (f !== text) text = f
+                                        if (!readOnly && (d.length === 8 || d.length === 0))
+                                            viewModel.definirVencimento(linhaItem.index, f)
                                     }
                                     onEditingFinished: if (!readOnly) {
                                         viewModel.definirVencimento(linhaItem.index, text)
@@ -1088,7 +1218,7 @@ ApplicationWindow {
                                 }
                                 ThemedButton {
                                     visible: linhaItem.elegivel && linhaItem.vencimentoEditavel
-                                    enabled: !viewModel.cruzando
+                                    enabled: !viewModel.sincronizando
                                     text: "📅"
                                     secundario: true
                                     implicitWidth: 34
@@ -1122,7 +1252,7 @@ ApplicationWindow {
                                     estilo: Theme.t.subtitle
                                     font.pixelSize: 11
                                     text: linhaItem.statusErp ? (linhaItem.parcelaErp || linhaItem.detalheErp)
-                                                              : (linhaItem.elegivel ? "Não cruzado" : "—")
+                                                              : (linhaItem.elegivel ? "Não sincronizado" : "—")
                                 }
                             }
 
