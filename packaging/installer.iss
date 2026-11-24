@@ -29,6 +29,7 @@ Name: "desktop"; Description: "Criar atalho na área de trabalho"; Flags: unchec
 
 [Files]
 Source: "..\dist\BoletoExtractor\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -37,6 +38,19 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktop
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Abrir o {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; \
+  StatusMsg: "Instalando Microsoft Visual C++ Runtime..."; \
+  Check: VCRedistNeedsInstall; Flags: waituntilterminated
+
+[Code]
+function VCRedistNeedsInstall: Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := not (RegQueryDWordValue(HKLM64,
+    'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
+    'Installed', Installed) and (Installed = 1));
+end;
 
 [InstallDelete]
 ; Remove arquivos da versão anterior que podem sobrar

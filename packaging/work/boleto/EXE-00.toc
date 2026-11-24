@@ -74,7 +74,7 @@
  [],
  False,
  False,
- 1795546497,
+ 1795550467,
  [('runw.exe',
    'C:\\boleto-extractor\\.venv-build\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],

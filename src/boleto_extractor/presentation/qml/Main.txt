@@ -883,15 +883,14 @@ ApplicationWindow {
                 ToolTip.text: "Ative o MySQL (ERP) nas configurações ⚙ e salve"
             }
             ThemedButton {
-    text: viewModel.salvandoObs ? "Salvando…"
-        : "📝 Salvar observações" + (viewModel.quantidadeObs > 0 ? " (" + viewModel.quantidadeObs + ")" : "")
-    implicitWidth: 210
-    enabled: viewModel.podeSalvarObs
-    onClicked: viewModel.salvarObservacoes()
-    ToolTip.visible: hovered && !enabled && !viewModel.salvandoObs
-    ToolTip.text: "Sincronize primeiro: só parcelas com status \"Encontrado\" recebem observação"
-}
-
+                text: viewModel.salvandoObs ? "Salvando…"
+                    : "📝 Salvar observações" + (viewModel.quantidadeObs > 0 ? " (" + viewModel.quantidadeObs + ")" : "")
+                implicitWidth: 210
+                enabled: viewModel.podeSalvarObs
+                onClicked: viewModel.salvarObservacoes()
+                ToolTip.visible: hovered && !enabled && !viewModel.salvandoObs
+                ToolTip.text: "Sincronize primeiro: só parcelas com status \"Encontrado\" recebem observação"
+            }
             ThemedButton {
                 text: "Exportar CSV"
                 secundario: true
